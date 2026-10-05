@@ -19,6 +19,7 @@ export type WidgetViewType =
   | 'agenda'
   | 'list'
   | 'day'
+  | 'afterSchool'
   | 'week'
   | 'multiWeek'
   | 'multiWeek2'
@@ -26,10 +27,10 @@ export type WidgetViewType =
   | 'multiWeek4'
   | 'month';
 
-export type ResolvedViewType = 'agenda' | 'list' | 'day' | 'week' | 'multiWeek' | 'month';
+export type ResolvedViewType = 'agenda' | 'list' | 'day' | 'afterSchool' | 'week' | 'multiWeek' | 'month';
 
 const VALID_VIEWS: WidgetViewType[] = [
-  'agenda', 'list', 'day', 'week', 'multiWeek', 'multiWeek2', 'multiWeek3', 'multiWeek4', 'month',
+  'agenda', 'list', 'day', 'afterSchool', 'week', 'multiWeek', 'multiWeek2', 'multiWeek3', 'multiWeek4', 'month',
 ];
 
 /**
@@ -40,6 +41,7 @@ const VALID_VIEWS: WidgetViewType[] = [
 export const VIEW_OPTIONS: { value: WidgetViewType; labelKey: string }[] = [
   { value: 'agenda', labelKey: 'agenda' },
   { value: 'day', labelKey: 'day' },
+  { value: 'afterSchool', labelKey: 'afterSchool' },
   { value: 'list', labelKey: 'list' },
   { value: 'week', labelKey: 'schedule' },
   { value: 'multiWeek', labelKey: 'week1Short' },
@@ -55,11 +57,13 @@ export function getAvailableViews(gridW: number, gridH: number): WidgetViewType[
   // 'day' is a single-day timeline (one time gutter + a column per shown
   // calendar; merged = one column), so it needs no more width than 'week',
   // which always draws seven day-columns. Offer 'day' wherever 'week' is
-  // offered rather than gating it behind a much wider widget.
-  if (gridW >= 36 && gridH >= 24) return ['agenda', 'list', 'day', 'week', ...mw, 'month'];
-  if (gridW >= 24 && gridH >= 36) return ['agenda', 'list', 'day', 'week', ...mw, 'month'];
-  if (gridW >= 24 && gridH >= 24) return ['agenda', 'list', 'day', 'week', ...mw, 'month'];
-  if (gridW >= 16 && gridH >= 16) return ['agenda', 'list', 'day', 'week', ...mw];
+  // offered rather than gating it behind a much wider widget. 'afterSchool'
+  // is the same component (just a fixed time range + fixed column set), so
+  // it shares the same size gate as 'day'.
+  if (gridW >= 36 && gridH >= 24) return ['agenda', 'list', 'day', 'afterSchool', 'week', ...mw, 'month'];
+  if (gridW >= 24 && gridH >= 36) return ['agenda', 'list', 'day', 'afterSchool', 'week', ...mw, 'month'];
+  if (gridW >= 24 && gridH >= 24) return ['agenda', 'list', 'day', 'afterSchool', 'week', ...mw, 'month'];
+  if (gridW >= 16 && gridH >= 16) return ['agenda', 'list', 'day', 'afterSchool', 'week', ...mw];
   return ['agenda'];
 }
 
@@ -162,7 +166,8 @@ export function useCalendarWidgetPrefs(gridW: number, gridH: number, scope = '')
   const goToPrevious = useCallback(() => {
     setCurrentDate(d => {
       switch (resolvedView) {
-        case 'day': return subDays(d, 1);
+        case 'day':
+        case 'afterSchool': return subDays(d, 1);
         case 'list':
         case 'week': return subWeeks(d, 1);
         case 'multiWeek': return subWeeks(d, resolvedWeekCount);
@@ -174,7 +179,8 @@ export function useCalendarWidgetPrefs(gridW: number, gridH: number, scope = '')
   const goToNext = useCallback(() => {
     setCurrentDate(d => {
       switch (resolvedView) {
-        case 'day': return addDays(d, 1);
+        case 'day':
+        case 'afterSchool': return addDays(d, 1);
         case 'list':
         case 'week': return addWeeks(d, 1);
         case 'multiWeek': return addWeeks(d, resolvedWeekCount);

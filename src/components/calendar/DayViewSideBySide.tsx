@@ -31,6 +31,7 @@ import {
   toDisplayDate,
 } from '@/lib/utils/timeFormat';
 import { eventsOverlappingRange } from '@/lib/utils/calendarRange';
+import { expandHourRange, type HourRange } from '@/lib/utils/afterSchoolView';
 
 export interface DayViewSideBySideProps {
   currentDate: Date;
@@ -50,6 +51,12 @@ export interface DayViewSideBySideProps {
   mealColor?: string;
   /** Click handler for meal/chore/task overlay cards (opens edit modal). */
   onItemClick?: (ref: OverlayItemRef) => void;
+  /**
+   * Replaces the hidden-hours-derived hour list with a fixed [start, end)
+   * range and hides the show/hide-hours toggle (there is nothing to toggle
+   * once the range is fixed by the view itself, e.g. the After School view).
+   */
+  fixedHourRange?: HourRange;
 }
 
 export function DayViewSideBySide({
@@ -68,6 +75,7 @@ export function DayViewSideBySide({
   enableDnd = false,
   mealColor,
   onItemClick,
+  fixedHourRange,
 }: DayViewSideBySideProps) {
   const { timeFormat, displayTimezone } = useTimeFormat();
   const t = useTranslations('calendar');
@@ -127,11 +135,13 @@ export function DayViewSideBySide({
       ? `${formatDisplayTime(event.startTime, timeFormat, {}, displayTimezone)} ${event.title}`
       : event.title;
 
-  const hours = getVisibleHours(timedEvents.map((event) => ({
-    ...event,
-    startTime: toDisplayDate(event.startTime, displayTimezone),
-    endTime: toDisplayDate(event.endTime, displayTimezone),
-  })), { from: dayStart, to: addDays(dayStart, 1) });
+  const hours = fixedHourRange
+    ? expandHourRange(fixedHourRange)
+    : getVisibleHours(timedEvents.map((event) => ({
+        ...event,
+        startTime: toDisplayDate(event.startTime, displayTimezone),
+        endTime: toDisplayDate(event.endTime, displayTimezone),
+      })), { from: dayStart, to: addDays(dayStart, 1) });
 
   // If there are no calendar groups configured or merged view is on, show all events in a single column
   const showAllInOne = calendarGroups.length === 0 || mergedView;
@@ -178,19 +188,21 @@ export function DayViewSideBySide({
           <div className={cn('flex sticky top-0 z-20', !transparentMode && 'bg-card/95')}>
             {/* Time column header with toggle button */}
             <div className="w-16 shrink-0 flex items-center justify-center">
-              <button
-                onClick={toggleHidden}
-                data-screensaver-keep
-                className={cn(
-                  'p-1.5 rounded-full transition-colors',
-                  hiddenSettings.enabled
-                    ? 'bg-blue-500 text-white'
-                    : 'hover:bg-accent text-muted-foreground'
-                )}
-                title={hiddenSettings.enabled ? t('showAllHours') : t('hideTimeBlock')}
-              >
-                <Clock className="h-4 w-4" />
-              </button>
+              {!fixedHourRange && (
+                <button
+                  onClick={toggleHidden}
+                  data-screensaver-keep
+                  className={cn(
+                    'p-1.5 rounded-full transition-colors',
+                    hiddenSettings.enabled
+                      ? 'bg-blue-500 text-white'
+                      : 'hover:bg-accent text-muted-foreground'
+                  )}
+                  title={hiddenSettings.enabled ? t('showAllHours') : t('hideTimeBlock')}
+                >
+                  <Clock className="h-4 w-4" />
+                </button>
+              )}
             </div>
             {displayGroups.map((group) => {
               const calAllDay = getAllDayEventsForGroup(group.id);

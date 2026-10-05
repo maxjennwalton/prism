@@ -27,6 +27,7 @@ import { useAuth } from '@/components/providers';
 import { useWeekStartsOn } from '@/lib/hooks/useWeekStartsOn';
 import { useCalendarWidgetPrefs, VIEW_OPTIONS, CalendarPrefsScopeContext } from '@/lib/hooks/useCalendarWidgetPrefs';
 import { useCalendarSyncHealth } from '@/lib/hooks/useCalendarSyncHealth';
+import { AFTER_SCHOOL_HOUR_RANGE, orderAfterSchoolGroups } from '@/lib/utils/afterSchoolView';
 import { CalendarWidgetControls } from './CalendarWidgetControls';
 import type { CalendarEvent } from '@/types/calendar';
 export type { CalendarEvent };
@@ -98,11 +99,23 @@ export const CalendarWidget = React.memo(function CalendarWidget({
   const rawEvents = externalEvents ?? apiEvents;
   const events = useMemo(() => deduplicateEvents(filterEvents(rawEvents)), [filterEvents, rawEvents]);
 
+  // After School always shows its own fixed column set (Family, Theo, Beckham,
+  // Max, Jenn), ignoring the "all/selected calendars" filter chips — the view
+  // itself defines its columns, not the user's per-group filter state. Groups
+  // that don't exist (e.g. not yet created) are skipped rather than erroring.
+  const afterSchoolGroups = useMemo(
+    () => orderAfterSchoolGroups(calendarGroups),
+    [calendarGroups],
+  );
+
   // Date range for overlay buckets (meals/chores/tasks). Mirrors the page-level
   // calculation so each view's visible window has the right data loaded.
-  const cardsMode = displayMode === 'cards';
+  // afterSchool is always cards mode (that's how dinner renders on its
+  // timeline), regardless of the shared inline/cards preference used by the
+  // other views.
+  const cardsMode = displayMode === 'cards' || resolvedView === 'afterSchool';
   const { from: bucketsFrom, to: bucketsTo } = useMemo(() => {
-    if (resolvedView === 'day') return { from: currentDate, to: currentDate };
+    if (resolvedView === 'day' || resolvedView === 'afterSchool') return { from: currentDate, to: currentDate };
     if (resolvedView === 'list' || resolvedView === 'week') {
       const ws = startOfWeek(currentDate, { weekStartsOn });
       return { from: ws, to: endOfWeek(currentDate, { weekStartsOn }) };
@@ -224,8 +237,9 @@ export const CalendarWidget = React.memo(function CalendarWidget({
 
   const showMerge = (resolvedView === 'day' || resolvedView === 'list') && calendarGroups.length > 1;
 
-  // Calendar filter chips
-  const calendarChips = calendarGroups.length > 0 ? (
+  // Calendar filter chips — not shown for After School, which always uses its
+  // own fixed column set rather than the all/selected-calendars filter.
+  const calendarChips = resolvedView !== 'afterSchool' && calendarGroups.length > 0 ? (
     <div className="flex items-center gap-1 flex-wrap px-3 pb-2 -mt-1">
       <button
         onClick={() => toggleCalendar('all')}
@@ -428,6 +442,28 @@ export const CalendarWidget = React.memo(function CalendarWidget({
                     showNotes={showNotes}
                     notesByDate={notesByDate}
                     onNoteChange={activeUser ? upsertNote : undefined}
+                  />
+                </div>
+              </div>
+            )}
+
+            {resolvedView === 'afterSchool' && (
+              <div className="h-full flex flex-col">
+                <div className="text-center text-sm font-medium text-foreground mb-2 shrink-0">
+                  {formatDayHeader(currentDate)}
+                </div>
+                <div className="flex-1 min-h-0">
+                  <DayViewSideBySide
+                    currentDate={currentDate}
+                    events={visibleEvents}
+                    calendarGroups={afterSchoolGroups}
+                    mergedView={false}
+                    bordered={widgetBordered}
+                    displayMode="cards"
+                    bucketsByDate={overlaysActive ? bucketsByDate : undefined}
+                    enableDnd={enableDnd}
+                    onEventClick={handleEventClick}
+                    fixedHourRange={AFTER_SCHOOL_HOUR_RANGE}
                   />
                 </div>
               </div>

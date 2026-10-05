@@ -63,6 +63,7 @@
     "views": {
       "agenda": "Agenda",
       "day": "Day",
+      "afterSchool": "After School",
       "list": "List",
       "schedule": "Schedule",
       "week1": "1 Week",

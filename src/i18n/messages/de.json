@@ -63,6 +63,7 @@
     "views": {
       "agenda": "Agenda",
       "day": "Tag",
+      "afterSchool": "Nach der Schule",
       "list": "Liste",
       "schedule": "Zeitplan",
       "week1": "1 Woche",
