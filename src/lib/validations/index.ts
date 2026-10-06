@@ -5,6 +5,7 @@
 
 import { z } from 'zod';
 import { DAYS_OF_WEEK } from '@/lib/constants/days';
+import { PREP_STEP_ANCHORS } from '@/lib/constants/activityProfiles';
 
 // COMMON SCHEMAS
 
@@ -394,6 +395,65 @@ export const createLayoutSchema = z.object({
 });
 
 export const updateLayoutSchema = createLayoutSchema.partial();
+
+// ACTIVITY PROFILE SCHEMAS (Sports & Activity Assistant — Phase 1 data model)
+
+export const activityGearItemSchema = z.object({
+  id: z.string().min(1).max(100),
+  label: z.string().min(1, 'Label is required').max(255),
+  sortOrder: z.number().int().default(0),
+});
+
+// Deliberately no `.default()` on arrivalBufferMinutes/travelMinutes anywhere
+// in this section — Prism never assumes a timing value. Omitted or explicit
+// null both mean "not configured yet", never a guessed number.
+const activityProfileBaseSchema = z.object({
+  name: z.string().min(1, 'Name is required').max(255),
+  category: z.string().max(100).nullable().optional(),
+  color: hexColorSchema.nullable().optional(),
+  matchKeywords: z.array(z.string().min(1).max(100)).max(50).optional(),
+  arrivalBufferMinutes: z.number().int().min(0).max(1440).nullable().optional(),
+  travelMinutes: z.number().int().min(0).max(1440).nullable().optional(),
+  defaultLocation: z.string().max(500).nullable().optional(),
+  gearItems: z.array(activityGearItemSchema).max(100).optional(),
+});
+
+export const createActivityProfileSchema = activityProfileBaseSchema;
+
+// PATCH semantics: an absent key means "leave this alone", an explicit null
+// clears it — same convention as updateEventSchema above.
+export const updateActivityProfileSchema = activityProfileBaseSchema.partial().extend({
+  archived: z.boolean().optional(),
+});
+
+export const createActivityProfilePrepStepSchema = z.object({
+  activityProfileId: uuidSchema,
+  label: z.string().min(1, 'Label is required').max(255),
+  sortOrder: z.number().int().optional().default(0),
+  anchor: z.enum(PREP_STEP_ANCHORS),
+  offsetMinutes: z.number().int().min(0).max(1440),
+  isCheckable: z.boolean().optional().default(true),
+  linksGear: z.boolean().optional().default(false),
+  assignedMemberId: uuidSchema.nullable().optional(),
+});
+
+export const updateActivityProfilePrepStepSchema = createActivityProfilePrepStepSchema
+  .omit({ activityProfileId: true })
+  .partial();
+
+export const updateActivityEventLinkSchema = z.object({
+  activityProfileId: uuidSchema.nullable().optional(),
+  assignedMemberId: uuidSchema.nullable().optional(),
+  responsibleAdultId: uuidSchema.nullable().optional(),
+  arrivalBufferMinutesOverride: z.number().int().min(0).max(1440).nullable().optional(),
+  travelMinutesOverride: z.number().int().min(0).max(1440).nullable().optional(),
+  locationOverride: z.string().max(500).nullable().optional(),
+});
+
+export const setActivityGearCompletionSchema = z.object({
+  gearItemId: z.string().min(1).max(100),
+  checked: z.boolean(),
+});
 
 // HELPER FUNCTION
 

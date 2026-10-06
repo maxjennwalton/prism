@@ -1902,3 +1902,221 @@ export const weekendVisitsRelations = relations(weekendVisits, ({ one }) => ({
   }),
 }));
 
+
+// ============================================================================
+// Sports & Activity Assistant — Activity Profiles (Phase 1: data model only)
+// ============================================================================
+// Reusable activity templates (e.g. "Hockey Practice") matched to synced
+// calendar events via activity_event_links. This never writes back to the
+// synced `events` row itself — the same one-directional, additive pattern
+// already used by calendar_notes and dismissed_events: a new table keyed to
+// events.id, invisible to sync, cascade-deleted if the event ever is.
+//
+// No timing is ever assumed. arrival_buffer_minutes and travel_minutes start
+// NULL on every new profile and stay NULL until a household configures them —
+// Prism never guesses that "a hockey game needs 45 minutes."
+
+/** Shape of one entry in activity_profiles.gear_items. */
+export interface ActivityGearItem {
+  id: string;
+  label: string;
+  sortOrder: number;
+}
+
+export const activityProfiles = pgTable('activity_profiles', {
+  id: uuid('id').defaultRandom().primaryKey(),
+
+  name: varchar('name', { length: 255 }).notNull(),
+
+  // Optional grouping/display only — no behavior depends on this value.
+  category: varchar('category', { length: 100 }),
+
+  color: varchar('color', { length: 7 }),
+
+  // Title keywords used for automatic event matching (a later phase). Empty
+  // by default — a profile with no keywords simply never auto-matches.
+  matchKeywords: jsonb('match_keywords').default([]).notNull().$type<string[]>(),
+
+  // Minutes to arrive before the event starts. NULL = not configured yet —
+  // deliberately no default value; never guessed from the activity name.
+  arrivalBufferMinutes: integer('arrival_buffer_minutes'),
+
+  // Manual v1 travel-time estimate in minutes. NULL = not configured. No
+  // routing/maps integration in v1.
+  travelMinutes: integer('travel_minutes'),
+
+  defaultLocation: text('default_location'),
+
+  // Reusable gear checklist template. Per-occurrence checked state lives in
+  // activity_gear_completions, keyed by the `id` inside each array entry
+  // (not a DB-level foreign key — see activity_gear_completions below).
+  gearItems: jsonb('gear_items').default([]).notNull().$type<ActivityGearItem[]>(),
+
+  // Soft-disable instead of hard delete, so existing activity_event_links
+  // keep a valid profile reference even after a profile is retired.
+  archived: boolean('archived').default(false).notNull(),
+
+  createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => ({
+  archivedIdx: index('activity_profiles_archived_idx').on(table.archived),
+}));
+
+export const activityProfilePrepSteps = pgTable('activity_profile_prep_steps', {
+  id: uuid('id').defaultRandom().primaryKey(),
+
+  activityProfileId: uuid('activity_profile_id')
+    .references(() => activityProfiles.id, { onDelete: 'cascade' })
+    .notNull(),
+
+  label: varchar('label', { length: 255 }).notNull(),
+
+  sortOrder: integer('sort_order').default(0).notNull(),
+
+  // Which system-calculated milestone this step's offset counts back from.
+  // event_start/arrival/leave_home are always computed (never stored rows —
+  // see activity_event_links) from the event's own startTime plus the
+  // profile/override buffers.
+  anchor: varchar('anchor', { length: 20 }).notNull()
+    .$type<'event_start' | 'arrival' | 'leave_home'>(),
+
+  // Minutes before the anchor this step happens.
+  offsetMinutes: integer('offset_minutes').notNull(),
+
+  // true = a checkable action ("Get dressed"); false = an informational
+  // milestone marker only.
+  isCheckable: boolean('is_checkable').default(true).notNull(),
+
+  // UI affordance only: marks this as "the gear-packing step" so the UI can
+  // link to the gear checklist from it. Does not drive any automatic
+  // checked-state coupling with gear completion — the two stay independent.
+  linksGear: boolean('links_gear').default(false).notNull(),
+
+  // Default assignee for this step (e.g. "Load car" usually falls to a
+  // parent). A future per-occurrence activity_step_completions table can
+  // reference this row's id directly to add per-event overrides/completion
+  // without any change here.
+  assignedMemberId: uuid('assigned_member_id').references(() => users.id, { onDelete: 'set null' }),
+
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => ({
+  profileIdx: index('activity_profile_prep_steps_profile_idx').on(table.activityProfileId, table.sortOrder),
+}));
+
+export const activityEventLinks = pgTable('activity_event_links', {
+  id: uuid('id').defaultRandom().primaryKey(),
+
+  // Prism's own local copy of the synced event — never the external
+  // provider's event. One link per event; cascades if the event is deleted,
+  // and is never read by sync, so it can never affect what gets written back.
+  eventId: uuid('event_id')
+    .references(() => events.id, { onDelete: 'cascade' })
+    .notNull(),
+
+  // Nullable: NULL means a human confirmed "this is not an activity". The
+  // existence of this row (not the profile value) is what stops a future
+  // matcher from reconsidering this event again — no separate tombstone
+  // table needed.
+  activityProfileId: uuid('activity_profile_id')
+    .references(() => activityProfiles.id, { onDelete: 'set null' }),
+
+  // Whose activity this is — overridable; a future matcher would infer a
+  // starting value from the event's calendar/group.
+  assignedMemberId: uuid('assigned_member_id').references(() => users.id, { onDelete: 'set null' }),
+
+  // Reserved for a future driver/parent-assignment feature (not built yet;
+  // nothing reads or writes this column in Phase 1).
+  responsibleAdultId: uuid('responsible_adult_id').references(() => users.id, { onDelete: 'set null' }),
+
+  // NULL = inherit the profile's value.
+  arrivalBufferMinutesOverride: integer('arrival_buffer_minutes_override'),
+  travelMinutesOverride: integer('travel_minutes_override'),
+  locationOverride: text('location_override'),
+
+  // true until a human edits anything on this row; a future matcher should
+  // then leave it alone on later syncs.
+  autoMatched: boolean('auto_matched').default(true).notNull(),
+
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => ({
+  eventIdx: uniqueIndex('activity_event_links_event_id_idx').on(table.eventId),
+  profileIdx: index('activity_event_links_profile_idx').on(table.activityProfileId),
+}));
+
+export const activityGearCompletions = pgTable('activity_gear_completions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+
+  activityEventLinkId: uuid('activity_event_link_id')
+    .references(() => activityEventLinks.id, { onDelete: 'cascade' })
+    .notNull(),
+
+  // Matches the `id` field inside the owning profile's gearItems jsonb
+  // array. Not a DB-level foreign key (it points into JSON, not a row) —
+  // removing a gear item from a profile can leave an orphaned completion
+  // row behind, which is harmless clutter rather than a correctness issue.
+  gearItemId: varchar('gear_item_id', { length: 100 }).notNull(),
+
+  checked: boolean('checked').default(false).notNull(),
+  checkedBy: uuid('checked_by').references(() => users.id, { onDelete: 'set null' }),
+  checkedAt: timestamp('checked_at'),
+
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+}, (table) => ({
+  linkItemUnique: uniqueIndex('activity_gear_completions_link_item_unique')
+    .on(table.activityEventLinkId, table.gearItemId),
+}));
+
+export const activityProfilesRelations = relations(activityProfiles, ({ one, many }) => ({
+  createdByUser: one(users, {
+    fields: [activityProfiles.createdBy],
+    references: [users.id],
+  }),
+  prepSteps: many(activityProfilePrepSteps),
+  eventLinks: many(activityEventLinks),
+}));
+
+export const activityProfilePrepStepsRelations = relations(activityProfilePrepSteps, ({ one }) => ({
+  profile: one(activityProfiles, {
+    fields: [activityProfilePrepSteps.activityProfileId],
+    references: [activityProfiles.id],
+  }),
+  assignedMember: one(users, {
+    fields: [activityProfilePrepSteps.assignedMemberId],
+    references: [users.id],
+  }),
+}));
+
+export const activityEventLinksRelations = relations(activityEventLinks, ({ one, many }) => ({
+  event: one(events, {
+    fields: [activityEventLinks.eventId],
+    references: [events.id],
+  }),
+  profile: one(activityProfiles, {
+    fields: [activityEventLinks.activityProfileId],
+    references: [activityProfiles.id],
+  }),
+  assignedMember: one(users, {
+    fields: [activityEventLinks.assignedMemberId],
+    references: [users.id],
+  }),
+  responsibleAdult: one(users, {
+    fields: [activityEventLinks.responsibleAdultId],
+    references: [users.id],
+  }),
+  gearCompletions: many(activityGearCompletions),
+}));
+
+export const activityGearCompletionsRelations = relations(activityGearCompletions, ({ one }) => ({
+  link: one(activityEventLinks, {
+    fields: [activityGearCompletions.activityEventLinkId],
+    references: [activityEventLinks.id],
+  }),
+  checkedByUser: one(users, {
+    fields: [activityGearCompletions.checkedBy],
+    references: [users.id],
+  }),
+}));
+

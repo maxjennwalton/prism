@@ -1,5 +1,7 @@
 import type { DayOfWeek } from '@/lib/constants/days';
 export type { DayOfWeek };
+import type { PrepStepAnchor } from '@/lib/constants/activityProfiles';
+export type { PrepStepAnchor };
 
 export interface FamilyMember {
   id: string;
@@ -160,5 +162,89 @@ export interface Meal {
   cookedAt?: Date | string | null;
   cookedBy?: { id: string; name: string; color: string } | null;
   createdBy?: { id: string; name: string; color: string } | null;
+  createdAt: Date | string;
+}
+
+// ============================================================================
+// Sports & Activity Assistant — Activity Profiles (Phase 1: data model only)
+// ============================================================================
+
+/** One entry in an ActivityProfile's reusable gear checklist template. */
+export interface ActivityGearItem {
+  id: string;
+  label: string;
+  sortOrder: number;
+}
+
+/** A reusable activity template (e.g. "Hockey Practice"), shared across whichever family members do that activity. */
+export interface ActivityProfile {
+  id: string;
+  name: string;
+  category?: string | null;
+  color?: string | null;
+  /** Title keywords used for automatic event matching (a later phase). */
+  matchKeywords: string[];
+  /** Minutes to arrive before the event starts. Null until configured — never assumed. */
+  arrivalBufferMinutes: number | null;
+  /** Manual v1 travel-time estimate in minutes. Null until configured. */
+  travelMinutes: number | null;
+  defaultLocation?: string | null;
+  gearItems: ActivityGearItem[];
+  archived: boolean;
+  createdBy?: { id: string; name: string; color: string } | null;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+}
+
+/** An ordered, reusable preparation step belonging to an ActivityProfile. */
+export interface ActivityProfilePrepStep {
+  id: string;
+  activityProfileId: string;
+  label: string;
+  sortOrder: number;
+  /** Which system-calculated milestone this step's offset counts back from. */
+  anchor: PrepStepAnchor;
+  /** Minutes before the anchor this step happens. */
+  offsetMinutes: number;
+  /** true = a checkable action; false = an informational milestone marker only. */
+  isCheckable: boolean;
+  /** UI affordance only — marks this as "the gear-packing step"; does not drive gear-completion state. */
+  linksGear: boolean;
+  assignedMember?: { id: string; name: string; color: string } | null;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+}
+
+/**
+ * One matched event OCCURRENCE — links Prism's local copy of a synced
+ * calendar event to an ActivityProfile, with per-occurrence overrides. Never
+ * written back to the synced event itself.
+ */
+export interface ActivityEventLink {
+  id: string;
+  eventId: string;
+  /** Null means a human confirmed "this is not an activity". */
+  activityProfileId: string | null;
+  assignedMember?: { id: string; name: string; color: string } | null;
+  /** Reserved for a future driver/parent-assignment feature — unused in Phase 1. */
+  responsibleAdult?: { id: string; name: string; color: string } | null;
+  /** Null = inherit the profile's value. */
+  arrivalBufferMinutesOverride: number | null;
+  travelMinutesOverride: number | null;
+  locationOverride?: string | null;
+  /** true until a human edits anything on this row. */
+  autoMatched: boolean;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+}
+
+/** Per-occurrence checked state for one gear item, so checking "helmet" for one practice never checks it for another. */
+export interface ActivityGearCompletion {
+  id: string;
+  activityEventLinkId: string;
+  gearItemId: string;
+  checked: boolean;
+  checkedBy?: { id: string; name: string; color: string } | null;
+  checkedAt?: Date | string | null;
   createdAt: Date | string;
 }

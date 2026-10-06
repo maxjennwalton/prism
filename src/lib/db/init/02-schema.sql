@@ -2660,3 +2660,65 @@ CREATE TABLE IF NOT EXISTS public.excluded_photos (
   created_at timestamp DEFAULT now() NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS excluded_photos_source_external_unique ON public.excluded_photos (source_id, external_id);
+
+-- Sports & Activity Assistant — Phase 1 data model (see drizzle/0027_activity_profiles.sql).
+-- Purely additive; no timing is seeded, and nothing here is read by sync.
+CREATE TABLE IF NOT EXISTS public.activity_profiles (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  name varchar(255) NOT NULL,
+  category varchar(100),
+  color varchar(7),
+  match_keywords jsonb DEFAULT '[]'::jsonb NOT NULL,
+  arrival_buffer_minutes integer,
+  travel_minutes integer,
+  default_location text,
+  gear_items jsonb DEFAULT '[]'::jsonb NOT NULL,
+  archived boolean DEFAULT false NOT NULL,
+  created_by uuid REFERENCES public.users(id) ON DELETE SET NULL,
+  created_at timestamp DEFAULT now() NOT NULL,
+  updated_at timestamp DEFAULT now() NOT NULL
+);
+CREATE INDEX IF NOT EXISTS activity_profiles_archived_idx ON public.activity_profiles (archived);
+
+CREATE TABLE IF NOT EXISTS public.activity_profile_prep_steps (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  activity_profile_id uuid NOT NULL REFERENCES public.activity_profiles(id) ON DELETE CASCADE,
+  label varchar(255) NOT NULL,
+  sort_order integer DEFAULT 0 NOT NULL,
+  anchor varchar(20) NOT NULL,
+  offset_minutes integer NOT NULL,
+  is_checkable boolean DEFAULT true NOT NULL,
+  links_gear boolean DEFAULT false NOT NULL,
+  assigned_member_id uuid REFERENCES public.users(id) ON DELETE SET NULL,
+  created_at timestamp DEFAULT now() NOT NULL,
+  updated_at timestamp DEFAULT now() NOT NULL,
+  CONSTRAINT activity_profile_prep_steps_anchor_check CHECK (anchor IN ('event_start', 'arrival', 'leave_home'))
+);
+CREATE INDEX IF NOT EXISTS activity_profile_prep_steps_profile_idx ON public.activity_profile_prep_steps (activity_profile_id, sort_order);
+
+CREATE TABLE IF NOT EXISTS public.activity_event_links (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  event_id uuid NOT NULL REFERENCES public.events(id) ON DELETE CASCADE,
+  activity_profile_id uuid REFERENCES public.activity_profiles(id) ON DELETE SET NULL,
+  assigned_member_id uuid REFERENCES public.users(id) ON DELETE SET NULL,
+  responsible_adult_id uuid REFERENCES public.users(id) ON DELETE SET NULL,
+  arrival_buffer_minutes_override integer,
+  travel_minutes_override integer,
+  location_override text,
+  auto_matched boolean DEFAULT true NOT NULL,
+  created_at timestamp DEFAULT now() NOT NULL,
+  updated_at timestamp DEFAULT now() NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS activity_event_links_event_id_idx ON public.activity_event_links (event_id);
+CREATE INDEX IF NOT EXISTS activity_event_links_profile_idx ON public.activity_event_links (activity_profile_id);
+
+CREATE TABLE IF NOT EXISTS public.activity_gear_completions (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  activity_event_link_id uuid NOT NULL REFERENCES public.activity_event_links(id) ON DELETE CASCADE,
+  gear_item_id varchar(100) NOT NULL,
+  checked boolean DEFAULT false NOT NULL,
+  checked_by uuid REFERENCES public.users(id) ON DELETE SET NULL,
+  checked_at timestamp,
+  created_at timestamp DEFAULT now() NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS activity_gear_completions_link_item_unique ON public.activity_gear_completions (activity_event_link_id, gear_item_id);
