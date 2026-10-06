@@ -137,16 +137,16 @@ export function PrepStepsEditor({
                 </label>
 
                 <div className="flex items-center gap-2 text-sm">
-                  <span className="text-muted-foreground">Usually:</span>
+                  <span className="text-muted-foreground whitespace-nowrap">Usually done by:</span>
                   <Select
                     value={step.assignedMemberId ?? 'none'}
                     onValueChange={(v) => updateStep(step.id, { assignedMemberId: v === 'none' ? null : v })}
                   >
-                    <SelectTrigger className="w-40" aria-label="Usually assigned to">
+                    <SelectTrigger className="w-52" aria-label="Usually done by">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="none">No one in particular</SelectItem>
+                      <SelectItem value="none">Not assigned</SelectItem>
                       {familyMembers.map((m) => (
                         <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>
                       ))}

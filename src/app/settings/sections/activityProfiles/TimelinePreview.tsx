@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Square, Info } from 'lucide-react';
+import { Square, Info, AlertCircle } from 'lucide-react';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import { computeTimelinePreview, type TimelinePreviewPrepStep } from '@/lib/utils/activityTimelinePreview';
@@ -18,6 +18,11 @@ function toTimeInputValue(d: Date): string {
  * Live, adjustable preview of an Activity Profile's calculated timing.
  * The sample event time is UI-only state — it is never read from or written
  * to the saved profile.
+ *
+ * Rows whose time depends on a buffer that isn't configured yet (NULL, not
+ * 0) are shown separately as "not yet configured" rather than at a
+ * misleading calculated time — see computeTimelinePreview for the NULL vs 0
+ * distinction this preserves.
  */
 export function TimelinePreview({
   arrivalBufferMinutes,
@@ -34,7 +39,7 @@ export function TimelinePreview({
     return d;
   });
 
-  const rows = useMemo(
+  const { scheduled, unscheduled } = useMemo(
     () => computeTimelinePreview(sampleTime, { arrivalBufferMinutes, travelMinutes, prepSteps }),
     [sampleTime, arrivalBufferMinutes, travelMinutes, prepSteps],
   );
@@ -62,13 +67,10 @@ export function TimelinePreview({
       </div>
 
       <div className="rounded-md border border-border divide-y divide-border overflow-hidden">
-        {rows.map((row) => {
+        {scheduled.map((row) => {
           if (row.kind === 'milestone') {
             return (
-              <div
-                key={row.id}
-                className="flex items-center gap-3 px-3 py-2 bg-muted/60"
-              >
+              <div key={row.id} className="flex items-center gap-3 px-3 py-2 bg-muted/60">
                 <span className="w-16 shrink-0 text-sm font-semibold tabular-nums">{formatClock(row.time)}</span>
                 <span className="text-sm font-bold uppercase tracking-wide">{row.label}</span>
               </div>
@@ -77,10 +79,7 @@ export function TimelinePreview({
 
           const isCheckable = row.kind === 'checkable';
           return (
-            <div
-              key={row.id}
-              className={cn('flex items-center gap-3 px-3 py-2', !isCheckable && 'bg-background/50')}
-            >
+            <div key={row.id} className={cn('flex items-center gap-3 px-3 py-2', !isCheckable && 'bg-background/50')}>
               <span className="w-16 shrink-0 text-sm tabular-nums text-muted-foreground">{formatClock(row.time)}</span>
               {isCheckable ? (
                 <Square className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
@@ -92,6 +91,20 @@ export function TimelinePreview({
           );
         })}
       </div>
+
+      {unscheduled.length > 0 && (
+        <div className="rounded-md border border-dashed border-border divide-y divide-dashed divide-border overflow-hidden">
+          {unscheduled.map((row) => (
+            <div key={row.id} className="flex items-center gap-3 px-3 py-2 text-muted-foreground">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+              <span className={cn('text-sm', row.kind === 'milestone' ? 'font-semibold uppercase tracking-wide' : 'italic')}>
+                {row.label}
+              </span>
+              <span className="text-xs ml-auto shrink-0">{row.reason}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

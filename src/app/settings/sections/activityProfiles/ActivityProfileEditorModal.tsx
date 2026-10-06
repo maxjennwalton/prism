@@ -214,25 +214,16 @@ export function ActivityProfileEditorModal({
           <div className="space-y-4">
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Timeline Preview</CardTitle>
-                <CardDescription>Adjust the sample time to see how your timing settings play out. This is for preview only — nothing here is saved.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <TimelinePreview
-                  arrivalBufferMinutes={draft.arrivalBufferMinutes}
-                  travelMinutes={draft.travelMinutes}
-                  prepSteps={previewPrepSteps}
-                />
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
                 <CardTitle className="text-base">Basic Information</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                <div className="flex items-center gap-3">
-                  <CalendarColorPicker color={draft.color} onChange={(color) => setDraft((d) => ({ ...d, color }))} />
+                <div className="flex items-end gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="ap-color">Color</Label>
+                    <div id="ap-color" className="h-9 flex items-center">
+                      <CalendarColorPicker color={draft.color} onChange={(color) => setDraft((d) => ({ ...d, color }))} />
+                    </div>
+                  </div>
                   <div className="flex-1 space-y-1.5">
                     <Label htmlFor="ap-name">Profile name</Label>
                     <Input id="ap-name" value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} placeholder="e.g. Hockey Practice" />
@@ -241,34 +232,6 @@ export function ActivityProfileEditorModal({
                 <div className="space-y-1.5">
                   <Label htmlFor="ap-category">Category (optional)</Label>
                   <Input id="ap-category" value={draft.category} onChange={(e) => setDraft((d) => ({ ...d, category: e.target.value }))} placeholder="e.g. Hockey" />
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Automatic Matching</CardTitle>
-                <CardDescription>
-                  These phrases will eventually help Prism recognize matching calendar events automatically — you&apos;ll always be able to review and correct every match. This isn&apos;t active yet; for now it just saves your keywords.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <div className="flex gap-2">
-                  <Input
-                    value={keywordInput}
-                    onChange={(e) => setKeywordInput(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addKeyword(); } }}
-                    placeholder="e.g. hockey practice"
-                  />
-                  <Button type="button" variant="outline" onClick={addKeyword}><Plus className="h-4 w-4" /></Button>
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {draft.matchKeywords.map((kw) => (
-                    <Badge key={kw} variant="secondary" className="gap-1">
-                      {kw}
-                      <button onClick={() => removeKeyword(kw)} aria-label={`Remove ${kw}`}><X className="h-3 w-3" /></button>
-                    </Badge>
-                  ))}
                 </div>
               </CardContent>
             </Card>
@@ -300,6 +263,48 @@ export function ActivityProfileEditorModal({
                 <div className="space-y-1.5">
                   <Label htmlFor="ap-location">Default location (optional)</Label>
                   <Input id="ap-location" value={draft.defaultLocation} onChange={(e) => setDraft((d) => ({ ...d, defaultLocation: e.target.value }))} />
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Timeline Preview</CardTitle>
+                <CardDescription>Adjust the sample time to see how your timing settings play out. This is for preview only — nothing here is saved.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <TimelinePreview
+                  arrivalBufferMinutes={draft.arrivalBufferMinutes}
+                  travelMinutes={draft.travelMinutes}
+                  prepSteps={previewPrepSteps}
+                />
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Automatic Matching</CardTitle>
+                <CardDescription>
+                  These phrases will eventually help Prism recognize matching calendar events automatically — you&apos;ll always be able to review and correct every match. This isn&apos;t active yet; for now it just saves your keywords.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <div className="flex gap-2">
+                  <Input
+                    value={keywordInput}
+                    onChange={(e) => setKeywordInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addKeyword(); } }}
+                    placeholder="e.g. hockey practice"
+                  />
+                  <Button type="button" variant="outline" onClick={addKeyword}><Plus className="h-4 w-4" /></Button>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {draft.matchKeywords.map((kw) => (
+                    <Badge key={kw} variant="secondary" className="gap-1">
+                      {kw}
+                      <button onClick={() => removeKeyword(kw)} aria-label={`Remove ${kw}`}><X className="h-3 w-3" /></button>
+                    </Badge>
+                  ))}
                 </div>
               </CardContent>
             </Card>
