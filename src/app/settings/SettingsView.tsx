@@ -22,6 +22,7 @@ import {
   Link2,
   ToggleLeft,
   ClipboardList,
+  Timer,
   Bus,
   KeyboardIcon,
   Monitor,
@@ -51,6 +52,7 @@ import { InputSection } from './sections/InputSection';
 import { FeaturesSection } from './sections/FeaturesSection';
 import { TelemetryCard } from './sections/TelemetryCard';
 import { ActivityLogSection } from './sections/ActivityLogSection';
+import { ActivityProfilesSection } from './sections/ActivityProfilesSection';
 
 import { DisplaysSection } from './sections/DisplaysSection';
 import { IntegrationsSection } from './sections/integrations/IntegrationsSection';
@@ -193,6 +195,7 @@ export function SettingsView() {
     { id: 'display', label: 'Appearance', icon: Palette },
     { id: 'photos', label: 'Photos', icon: ImageIcon },
     { id: 'bus', label: 'Bus Tracking', icon: Bus },
+    { id: 'activityProfiles', label: 'Activity Profiles', icon: Timer },
     { id: 'input', label: 'Input', icon: KeyboardIcon },
     { id: 'babysitter', label: 'Babysitter Info', icon: Baby },
     { id: 'features', label: 'Features', icon: ToggleLeft },
@@ -279,6 +282,7 @@ export function SettingsView() {
               {activeSection === 'displays' && <DisplaysSection />}
               {activeSection === 'photos' && <PhotosSettingsSection />}
               {activeSection === 'bus' && <BusTrackingSection />}
+              {activeSection === 'activityProfiles' && <ActivityProfilesSection />}
               {activeSection === 'babysitter' && <BabysitterInfoSection />}
               {activeSection === 'general' && <GeneralSection />}
               {activeSection === 'display' && <DisplaySection />}

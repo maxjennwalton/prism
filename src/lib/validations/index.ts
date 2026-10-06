@@ -401,7 +401,7 @@ export const updateLayoutSchema = createLayoutSchema.partial();
 export const activityGearItemSchema = z.object({
   id: z.string().min(1).max(100),
   label: z.string().min(1, 'Label is required').max(255),
-  sortOrder: z.number().int().default(0),
+  sortOrder: z.number().int(),
 });
 
 // Deliberately no `.default()` on arrivalBufferMinutes/travelMinutes anywhere

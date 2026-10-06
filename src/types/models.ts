@@ -196,6 +196,14 @@ export interface ActivityProfile {
   updatedAt: Date | string;
 }
 
+/** ActivityProfile plus the derived counts the Phase 2 list view shows (prep steps, gear items, match keywords). */
+export interface ActivityProfileSummary extends Omit<ActivityProfile, 'createdBy'> {
+  createdBy?: string | null;
+  prepStepCount: number;
+  gearItemCount: number;
+  matchKeywordCount: number;
+}
+
 /** An ordered, reusable preparation step belonging to an ActivityProfile. */
 export interface ActivityProfilePrepStep {
   id: string;
