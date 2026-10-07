@@ -34,6 +34,11 @@ jest.mock('@/lib/hooks/useActivityProfiles', () => ({
   }),
 }));
 
+const mockUseActivityMatchingStatus = jest.fn();
+jest.mock('@/lib/hooks/useActivityMatchingStatus', () => ({
+  useActivityMatchingStatus: () => mockUseActivityMatchingStatus(),
+}));
+
 const SUMMARY_WITH_ARCHIVED_CANDIDATE = {
   total: 1,
   autoMatched: 0,
@@ -64,6 +69,13 @@ const SUMMARY_WITH_ARCHIVED_CANDIDATE = {
 describe('PreviewMatchesPanel — discards a stale preview snapshot once profiles change', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockUseActivityMatchingStatus.mockReturnValue({
+      status: { enabled: false, enabledAt: null },
+      loading: false,
+      refresh: jest.fn(),
+      activate: jest.fn(),
+      disable: jest.fn(),
+    });
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
       json: async () => SUMMARY_WITH_ARCHIVED_CANDIDATE,
@@ -100,5 +112,40 @@ describe('PreviewMatchesPanel — discards a stale preview snapshot once profile
     await flush();
 
     expect(screen.queryByText('U9MD - Game vs Wasaga Beach Stars')).not.toBeNull();
+  });
+});
+
+describe('PreviewMatchesPanel — description copy depends on Activity Matching status', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: async () => SUMMARY_WITH_ARCHIVED_CANDIDATE }) as unknown as typeof fetch;
+  });
+
+  it('shows the OFF-state description when matching is disabled', () => {
+    mockUseActivityMatchingStatus.mockReturnValue({
+      status: { enabled: false, enabledAt: null },
+      loading: false,
+      refresh: jest.fn(),
+      activate: jest.fn(),
+      disable: jest.fn(),
+    });
+    render(<PreviewMatchesPanel profilesVersion={0} />);
+    expect(
+      screen.getByText('See what Activity Matching would do over the next 60 days before turning it on. Previewing never saves anything.'),
+    ).not.toBeNull();
+  });
+
+  it('shows the ON-state description when matching is enabled', () => {
+    mockUseActivityMatchingStatus.mockReturnValue({
+      status: { enabled: true, enabledAt: '2026-10-01T00:00:00.000Z' },
+      loading: false,
+      refresh: jest.fn(),
+      activate: jest.fn(),
+      disable: jest.fn(),
+    });
+    render(<PreviewMatchesPanel profilesVersion={0} />);
+    expect(
+      screen.getByText('Preview how your current Activity Profiles and identifiers would match upcoming events. Previewing never changes saved matches.'),
+    ).not.toBeNull();
   });
 });

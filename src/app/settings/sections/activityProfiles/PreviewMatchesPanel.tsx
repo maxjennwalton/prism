@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { useFamily } from '@/components/providers';
 import { useActivityProfiles } from '@/lib/hooks/useActivityProfiles';
+import { useActivityMatchingStatus } from '@/lib/hooks/useActivityMatchingStatus';
 import {
   useActivityMatchingPreview,
   type ActivityMatchEventSummary,
@@ -69,6 +70,7 @@ function countFor(summary: ActivityMatchRangeSummary, filter: PreviewFilter): nu
 export function PreviewMatchesPanel({ profilesVersion }: { profilesVersion: number }) {
   const { members } = useFamily();
   const { profiles } = useActivityProfiles({ includeArchived: true });
+  const { status: matchingStatus } = useActivityMatchingStatus();
   const { summary, loading, error, runPreview, clearSummary } = useActivityMatchingPreview();
   const [filter, setFilter] = useState<PreviewFilter>('all');
   const ranAtProfilesVersionRef = useRef<number | null>(null);
@@ -109,7 +111,9 @@ export function PreviewMatchesPanel({ profilesVersion }: { profilesVersion: numb
       <div>
         <h3 className="text-sm font-semibold">Preview Matches</h3>
         <p className="text-sm text-muted-foreground">
-          See what matching would do over the next 60 days before turning it on. This never saves anything.
+          {matchingStatus.enabled
+            ? 'Preview how your current Activity Profiles and identifiers would match upcoming events. Previewing never changes saved matches.'
+            : 'See what Activity Matching would do over the next 60 days before turning it on. Previewing never saves anything.'}
         </p>
       </div>
 
