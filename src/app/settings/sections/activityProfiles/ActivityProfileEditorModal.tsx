@@ -300,7 +300,7 @@ export function ActivityProfileEditorModal({
               <CardHeader>
                 <CardTitle className="text-base">Automatic Matching</CardTitle>
                 <CardDescription>
-                  These phrases will eventually help Prism recognize matching calendar events automatically — you&apos;ll always be able to review and correct every match. This isn&apos;t active yet; for now it just saves your keywords.
+                  Add words or phrases Prism can use to recognize calendar events that belong to this Activity Profile.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-2">
