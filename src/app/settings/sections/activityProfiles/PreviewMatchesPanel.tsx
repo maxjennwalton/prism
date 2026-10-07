@@ -44,28 +44,37 @@ function countFor(summary: ActivityMatchRangeSummary, filter: PreviewFilter): nu
 }
 
 /**
- * Read-only preview of what Activity Matching would do over the next 60
+ * Read-only simulation of what Activity Matching would do over the next 60
  * days, run on demand against the exact same matcher Activate uses — never
  * on page load, never saving anything. See useActivityMatchingPreview.
  *
+ * Only ever shown while matching is OFF. Once it's ON, this is structurally
+ * incapable of meaning "what would happen to my upcoming events": its
+ * underlying query (loadUnlinkedEventsInRange) only ever looks at events
+ * with no activity_event_link yet, so the moment activation/backfill or a
+ * cron tick has linked an event, it silently drops out of this population
+ * — a real household testing Phase 3 saw this firsthand (24 auto-matched +
+ * 12 Review Required events "disappeared", leaving a confusing
+ * `Review Required (0)` directly above the real, non-empty Review Required
+ * queue). Rather than relabel a query that no longer answers the question
+ * its label implies, this panel is hidden entirely once matching is ON —
+ * NeedsReviewPanel's real, saved queue is the source of truth from then on.
+ *
  * The filter row below is purely a client-side view over the single
- * preview response already fetched: switching filters narrows which rows
- * are displayed (filterPreviewResults) without a new request, without
+ * response already fetched: switching filters narrows which rows are
+ * displayed (filterPreviewResults) without a new request, without
  * re-running the matcher, and without touching activity_event_links,
  * events, profiles, or settings. Results are shown in the order the API
  * returned them — ascending by event start time is the service's job
  * (see loadUnlinkedEventsInRange), not something re-sorted here.
  *
  * `profilesVersion` is bumped by ActivityProfilesSection every time a
- * profile is archived, restored, duplicated, created, or edited. Preview
- * is a point-in-time snapshot fetched only on demand (see
+ * profile is archived, restored, duplicated, created, or edited. A test
+ * run is a point-in-time snapshot fetched only on demand (see
  * useActivityMatchingPreview) — if a profile's archived state changes
  * after that snapshot was taken, the snapshot no longer reflects what
  * matching would currently do, so it's discarded rather than left on
- * screen looking current. The matcher call behind Preview has always
- * excluded archived profiles (see matchEventsInRange/listActivityProfiles);
- * what was stale was this component continuing to display a result
- * computed before the archive action.
+ * screen looking current.
  */
 export function PreviewMatchesPanel({ profilesVersion }: { profilesVersion: number }) {
   const { members } = useFamily();
@@ -106,14 +115,18 @@ export function PreviewMatchesPanel({ profilesVersion }: { profilesVersion: numb
     [summary, filter],
   );
 
+  // The saved matching state (MatchingStatusPanel + NeedsReviewPanel) is the
+  // source of truth once matching is ON — see the doc comment above. This
+  // comes after every hook call above so render always calls the same
+  // hooks in the same order, regardless of status.
+  if (matchingStatus.enabled) return null;
+
   return (
     <div className="space-y-3">
       <div>
-        <h3 className="text-sm font-semibold">Preview Matches</h3>
+        <h3 className="text-sm font-semibold">Test Activity Matching</h3>
         <p className="text-sm text-muted-foreground">
-          {matchingStatus.enabled
-            ? 'Preview how your current Activity Profiles and identifiers would match upcoming events. Previewing never changes saved matches.'
-            : 'See what Activity Matching would do over the next 60 days before turning it on. Previewing never saves anything.'}
+          See how Activity Matching would handle your upcoming calendar events before you turn it on. Nothing will be saved.
         </p>
       </div>
 
@@ -129,7 +142,7 @@ export function PreviewMatchesPanel({ profilesVersion }: { profilesVersion: numb
         disabled={loading}
       >
         {loading ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Eye className="h-4 w-4 mr-1.5" />}
-        {loading ? 'Checking…' : 'Preview Matches'}
+        {loading ? 'Checking…' : 'Run Test'}
       </Button>
 
       {error && <p className="text-sm text-destructive">{error}</p>}
@@ -160,7 +173,7 @@ export function PreviewMatchesPanel({ profilesVersion }: { profilesVersion: numb
 
           {summary.total > 0 && (
             <>
-              <p className="text-xs text-muted-foreground">Preview only — nothing saved.</p>
+              <p className="text-xs text-muted-foreground">Test only — nothing saved.</p>
 
               {visibleResults.length > 0 ? (
                 <div className="rounded-md border border-border divide-y divide-border overflow-hidden max-h-80 overflow-y-auto">

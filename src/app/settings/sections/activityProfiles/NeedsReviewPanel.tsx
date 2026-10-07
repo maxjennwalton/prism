@@ -19,18 +19,43 @@ interface ReviewReasonCopy {
   description: string;
 }
 
-const REVIEW_REASON_LABEL: Record<NonNullable<NeedsReviewItem['reviewReason']>, ReviewReasonCopy> = {
-  unclassified: { description: "Looks like an activity, but doesn't match any profile yet." },
+const STATIC_REVIEW_REASON_LABEL: Record<Exclude<NonNullable<NeedsReviewItem['reviewReason']>, 'unclassified'>, ReviewReasonCopy> = {
   ambiguous_profile: { description: 'Could match more than one Activity Profile.' },
   ambiguous_member: { description: "Can't tell which family member this is for." },
   ambiguous_both: { description: "Can't tell which profile or family member this is for." },
   ambiguous_category: { description: 'This event’s identifiers point to more than one category (e.g. Hockey and Soccer) — fix the category on one of them.' },
   category_unresolved: {
-    title: 'Category needed',
-    description:
-      "This event looks like an activity, but Prism can't tell which activity category it belongs to. Add or update a Team & Calendar Identifier, or review the match manually.",
+    title: 'Activity type not recognized',
+    description: "Prism found a possible activity but doesn't know what type it is yet. Choose the correct Activity Profile below, or mark it as Not an Activity.",
   },
 };
+
+/**
+ * `unclassified` means: an identifier matched this title, so Prism is
+ * confident it's a real activity, but no Activity Profile's keywords
+ * matched it. Whether that identifier also resolved to exactly one family
+ * member is a second, independent fact worth saying out loud, rather than
+ * leaving a parent to guess from a profile dropdown why the event got here
+ * at all. `memberName` is the resolved member's display name, or null when
+ * the matched identifier(s) didn't resolve to exactly one person.
+ */
+function unclassifiedCopy(memberName: string | null): ReviewReasonCopy {
+  if (memberName) {
+    return {
+      title: 'No matching Activity Profile',
+      description: `Prism knows this is ${memberName}'s activity, but there isn't a matching Activity Profile yet. Choose one below, create a new profile, or mark it as Not an Activity.`,
+    };
+  }
+  return {
+    title: 'No matching Activity Profile',
+    description:
+      "Prism recognized this as a scheduled activity, but there isn't a matching Activity Profile yet and it isn't sure which family member it's for. Choose the correct profile and family member below, or mark it as Not an Activity.",
+  };
+}
+
+function reviewReasonCopy(reason: NonNullable<NeedsReviewItem['reviewReason']>, memberName: string | null): ReviewReasonCopy {
+  return reason === 'unclassified' ? unclassifiedCopy(memberName) : STATIC_REVIEW_REASON_LABEL[reason];
+}
 
 function formatEventTime(iso: string): string {
   return new Date(iso).toLocaleString(undefined, {
@@ -59,6 +84,13 @@ function NeedsReviewRow({
   const [memberId, setMemberId] = useState(item.assignedMemberId);
   const [working, setWorking] = useState<'confirm' | 'reject' | null>(null);
 
+  // The member the matcher actually resolved for this event (independent of
+  // whatever the dropdown below is currently set to) — this is what
+  // "Prism knows this is {member}'s activity" refers to.
+  const resolvedMemberName = item.assignedMemberId
+    ? members.find((m) => m.id === item.assignedMemberId)?.name ?? null
+    : null;
+
   const handleConfirm = async () => {
     setWorking('confirm');
     try {
@@ -86,14 +118,15 @@ function NeedsReviewRow({
       <div>
         <div className="font-medium truncate">{item.eventTitle}</div>
         <div className="text-xs text-muted-foreground">{formatEventTime(item.eventStartTime)}</div>
-        {item.reviewReason && (
-          <div className="text-xs text-muted-foreground mt-0.5">
-            {REVIEW_REASON_LABEL[item.reviewReason].title && (
-              <div className="font-medium text-foreground">{REVIEW_REASON_LABEL[item.reviewReason].title}</div>
-            )}
-            <div className="italic">{REVIEW_REASON_LABEL[item.reviewReason].description}</div>
-          </div>
-        )}
+        {item.reviewReason && (() => {
+          const copy = reviewReasonCopy(item.reviewReason, resolvedMemberName);
+          return (
+            <div className="text-xs text-muted-foreground mt-0.5">
+              {copy.title && <div className="font-medium text-foreground">{copy.title}</div>}
+              <div className="italic">{copy.description}</div>
+            </div>
+          );
+        })()}
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -102,7 +135,7 @@ function NeedsReviewRow({
             <SelectValue placeholder="Select a profile" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="none">No profile</SelectItem>
+            <SelectItem value="none">Choose Activity Profile…</SelectItem>
             {profiles.map((p) => (
               <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
             ))}
