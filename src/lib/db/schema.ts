@@ -1923,6 +1923,21 @@ export interface ActivityGearItem {
   sortOrder: number;
 }
 
+/**
+ * Shape of activity_event_links.match_meta (Phase 3). Only ever read back
+ * for display on a needs_review row — never queried on, so it stays jsonb
+ * rather than normalized columns. `reviewReason` is deliberately coarse
+ * (mirrors match_status); these fields hold the specific candidates behind
+ * that reason.
+ */
+export interface ActivityMatchMeta {
+  reviewReason: 'unclassified' | 'ambiguous_profile' | 'ambiguous_member' | 'ambiguous_both' | null;
+  matchedPhrase: string | null;
+  profileCandidates: { profileId: string; matchedPhrase: string }[];
+  memberCandidates: string[];
+  identifiersFound: string[];
+}
+
 export const activityProfiles = pgTable('activity_profiles', {
   id: uuid('id').defaultRandom().primaryKey(),
 
@@ -2039,11 +2054,17 @@ export const activityEventLinks = pgTable('activity_event_links', {
   // then leave it alone on later syncs.
   autoMatched: boolean('auto_matched').default(true).notNull(),
 
+  // Phase 3 (Activity Event Matching). NULL = this row predates matching
+  // (created manually) and carries no matching metadata.
+  matchStatus: varchar('match_status', { length: 20 }).$type<'auto_confirmed' | 'needs_review' | 'confirmed' | 'rejected' | null>(),
+  matchMeta: jsonb('match_meta').$type<ActivityMatchMeta | null>(),
+
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (table) => ({
   eventIdx: uniqueIndex('activity_event_links_event_id_idx').on(table.eventId),
   profileIdx: index('activity_event_links_profile_idx').on(table.activityProfileId),
+  matchStatusIdx: index('activity_event_links_match_status_idx').on(table.matchStatus),
 }));
 
 export const activityGearCompletions = pgTable('activity_gear_completions', {

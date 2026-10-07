@@ -151,3 +151,12 @@ export async function closeDatabase(): Promise<void> {
  * Export types for use in other files.
  */
 export type Database = typeof db;
+
+/**
+ * The query-builder surface shared by `db` and the `tx` passed into
+ * `db.transaction(async (tx) => ...)`. `tx` isn't assignable to `Database`
+ * itself (it lacks `$client` and friends), but both expose identical
+ * select/insert/update/delete builders — so a helper typed to accept either
+ * works unchanged inside or outside a transaction.
+ */
+export type DbExecutor = Pick<Database, 'select' | 'insert' | 'update' | 'delete'>;
