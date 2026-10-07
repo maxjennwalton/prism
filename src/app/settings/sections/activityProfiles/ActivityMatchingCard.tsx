@@ -11,8 +11,12 @@ import { NeedsReviewPanel } from './NeedsReviewPanel';
  * automatic matching, previewing matches, and reviewing ambiguous ones.
  * Sits above the Activity Profiles list since it configures how calendar
  * events get linked to those profiles in the first place.
+ *
+ * `profilesVersion` is forwarded to PreviewMatchesPanel so it can discard a
+ * preview snapshot that was computed before a profile was archived,
+ * restored, duplicated, created, or edited — see its own doc comment.
  */
-export function ActivityMatchingCard() {
+export function ActivityMatchingCard({ profilesVersion }: { profilesVersion: number }) {
   return (
     <Card>
       <CardHeader>
@@ -24,7 +28,7 @@ export function ActivityMatchingCard() {
       <CardContent className="space-y-6">
         <TeamIdentifiersEditor />
         <MatchingStatusPanel />
-        <PreviewMatchesPanel />
+        <PreviewMatchesPanel profilesVersion={profilesVersion} />
         <NeedsReviewPanel />
       </CardContent>
     </Card>

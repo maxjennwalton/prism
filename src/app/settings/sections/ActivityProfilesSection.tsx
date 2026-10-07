@@ -33,7 +33,15 @@ export function ActivityProfilesSection() {
   const [restoringId, setRestoringId] = useState<string | null>(null);
   const { confirm, dialogProps: confirmDialogProps } = useConfirmDialog();
 
-  const refreshAll = async () => { await Promise.all([refreshActive(), refreshArchived()]); };
+  // Bumped on every mutation below (archive, restore, duplicate, create,
+  // edit) so ActivityMatchingCard's Preview panel can tell its last
+  // snapshot is stale and discard it — see PreviewMatchesPanel's doc comment.
+  const [profilesVersion, setProfilesVersion] = useState(0);
+
+  const refreshAll = async () => {
+    await Promise.all([refreshActive(), refreshArchived()]);
+    setProfilesVersion((v) => v + 1);
+  };
 
   const handleArchive = async (p: ActivityProfileListItem) => {
     if (!await confirm(`Archive "${p.name}"?`, 'You can restore it later from the archived list below.')) return;
@@ -69,7 +77,7 @@ export function ActivityProfilesSection() {
 
   return (
     <div className="space-y-6">
-      <ActivityMatchingCard />
+      <ActivityMatchingCard profilesVersion={profilesVersion} />
 
       <div className="flex items-center justify-between">
         <div>

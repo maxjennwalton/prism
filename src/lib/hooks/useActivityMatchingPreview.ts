@@ -64,5 +64,15 @@ export function useActivityMatchingPreview() {
     }
   }, []);
 
-  return { summary, loading, error, runPreview };
+  /**
+   * Discards the last preview run without starting a new one. Preview is a
+   * point-in-time snapshot (see runPreview's doc comment: never on mount,
+   * never polled) — if what it was computed against changes afterward
+   * (a profile gets archived, edited, or an identifier's category changes),
+   * the snapshot no longer describes what matching would currently do, so
+   * the caller clears it rather than let it keep being shown as current.
+   */
+  const clearSummary = useCallback(() => setSummary(null), []);
+
+  return { summary, loading, error, runPreview, clearSummary };
 }

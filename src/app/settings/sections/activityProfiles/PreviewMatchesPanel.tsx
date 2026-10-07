@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Eye, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -54,12 +54,31 @@ function countFor(summary: ActivityMatchRangeSummary, filter: PreviewFilter): nu
  * events, profiles, or settings. Results are shown in the order the API
  * returned them — ascending by event start time is the service's job
  * (see loadUnlinkedEventsInRange), not something re-sorted here.
+ *
+ * `profilesVersion` is bumped by ActivityProfilesSection every time a
+ * profile is archived, restored, duplicated, created, or edited. Preview
+ * is a point-in-time snapshot fetched only on demand (see
+ * useActivityMatchingPreview) — if a profile's archived state changes
+ * after that snapshot was taken, the snapshot no longer reflects what
+ * matching would currently do, so it's discarded rather than left on
+ * screen looking current. The matcher call behind Preview has always
+ * excluded archived profiles (see matchEventsInRange/listActivityProfiles);
+ * what was stale was this component continuing to display a result
+ * computed before the archive action.
  */
-export function PreviewMatchesPanel() {
+export function PreviewMatchesPanel({ profilesVersion }: { profilesVersion: number }) {
   const { members } = useFamily();
   const { profiles } = useActivityProfiles({ includeArchived: true });
-  const { summary, loading, error, runPreview } = useActivityMatchingPreview();
+  const { summary, loading, error, runPreview, clearSummary } = useActivityMatchingPreview();
   const [filter, setFilter] = useState<PreviewFilter>('all');
+  const ranAtProfilesVersionRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (ranAtProfilesVersionRef.current !== null && ranAtProfilesVersionRef.current !== profilesVersion) {
+      clearSummary();
+      ranAtProfilesVersionRef.current = null;
+    }
+  }, [profilesVersion, clearSummary]);
 
   const profileNames = useMemo(() => new Map(profiles.map((p) => [p.id, p.name])), [profiles]);
   const memberNames = useMemo(() => new Map(members.filter((m) => m.id).map((m) => [m.id, m.name])), [members]);
@@ -86,6 +105,7 @@ export function PreviewMatchesPanel() {
         size="sm"
         onClick={() => {
           setFilter('all');
+          ranAtProfilesVersionRef.current = profilesVersion;
           runPreview();
         }}
         disabled={loading}
