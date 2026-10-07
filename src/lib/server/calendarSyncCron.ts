@@ -15,6 +15,7 @@
 import { syncAllGoogleCalendars, syncAllIcalCalendars, syncAllCalDAVCalendars } from '@/lib/services/calendar-sync';
 import { syncCardDAVBirthdays } from '@/lib/services/carddav-birthday-sync';
 import { detectBirthdaysFromEvents } from '@/lib/services/birthday-detect';
+import { runActivityMatchingTick } from '@/lib/services/activityMatching';
 import { invalidateEntity } from '@/lib/cache/cacheKeys';
 
 const INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
@@ -35,6 +36,12 @@ async function runOnce() {
     // Manage Calendars and hit sync.
     const detected = await detectBirthdaysFromEvents();
 
+    // Same reasoning: activity matching looks at events sync just wrote, and
+    // only ever runs at all once a household has explicitly turned it on
+    // (see runActivityMatchingTick). A disabled household pays nothing extra
+    // here — not even the "no activity" rows this sometimes creates.
+    const matched = await runActivityMatchingTick();
+
     const total = google.total + ical.total + caldav.total + carddav.synced;
     const errors = [
       ...google.errors, ...ical.errors, ...caldav.errors,
@@ -49,13 +56,17 @@ async function runOnce() {
       await invalidateEntity('birthdays');
     }
 
+    const matchedSuffix = matched
+      ? ` (activity matching: ${matched.autoMatched} auto-matched, ${matched.needsReview} need review)`
+      : '';
+
     if (errors.length > 0) {
       console.warn(
         `[calendar-cron] synced ${total} events/tasks with ${errors.length} errors:`,
         errors.slice(0, 3),
       );
     } else {
-      console.log(`[calendar-cron] synced ${total} events/tasks`);
+      console.log(`[calendar-cron] synced ${total} events/tasks${matchedSuffix}`);
     }
   } catch (err) {
     // Never let a transient sync failure crash the cron loop.

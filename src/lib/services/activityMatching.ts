@@ -84,6 +84,14 @@ async function loadUnlinkedEventsInRange(executor: DbExecutor, from: Date, to: D
     );
 }
 
+const MATCHING_ENABLED_SETTING_KEY = 'activityMatchingEnabled';
+
+async function isMatchingEnabled(executor: DbExecutor): Promise<boolean> {
+  const [row] = await executor.select().from(settings).where(eq(settings.key, MATCHING_ENABLED_SETTING_KEY));
+  const value = row?.value;
+  return Boolean(value && typeof value === 'object' && (value as { enabled?: unknown }).enabled === true);
+}
+
 export interface MatchEventsInRangeOptions {
   /** false (Preview) runs the matcher and reports results without writing anything. */
   persist: boolean;
@@ -149,4 +157,17 @@ export async function matchEventsInRange(
   }
 
   return { total: candidateEvents.length, autoMatched, needsReview, ignored, results };
+}
+
+/**
+ * Entry point for the calendar sync cron. Runs the exact same bounded
+ * 60-day pass Activate uses, but only when a household has actually turned
+ * matching on — before that, the cron must never create a single
+ * activity_event_links row. Returns null when matching is disabled (so the
+ * cron can skip it from its report entirely) rather than an empty summary.
+ */
+export async function runActivityMatchingTick(): Promise<MatchRangeSummary | null> {
+  if (!(await isMatchingEnabled(db))) return null;
+  const { from, to } = activityMatchingWindow();
+  return matchEventsInRange(from, to, { persist: true });
 }
