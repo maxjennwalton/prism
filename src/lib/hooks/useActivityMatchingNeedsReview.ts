@@ -11,10 +11,12 @@ export interface NeedsReviewItem {
   eventStartTime: string;
   activityProfileId: string | null;
   assignedMemberId: string | null;
-  reviewReason: 'unclassified' | 'ambiguous_profile' | 'ambiguous_member' | 'ambiguous_both' | null;
+  reviewReason: 'unclassified' | 'ambiguous_profile' | 'ambiguous_member' | 'ambiguous_both' | 'ambiguous_category' | null;
   profileCandidates: { profileId: string; matchedPhrase: string }[];
   memberCandidates: string[];
   identifiersFound: string[];
+  resolvedCategory: string | null;
+  categoryCandidates: string[];
 }
 
 async function parseOrThrow(res: Response, fallback: string): Promise<void> {

@@ -11,6 +11,13 @@ import { useCallback, useEffect, useState } from 'react';
 export interface ActivityTeamIdentifier {
   identifier: string;
   memberId: string;
+  /**
+   * Which sport/activity this identifier belongs to (e.g. "Hockey"), used to
+   * narrow which Activity Profiles matching considers for this event. Null
+   * means "no category context" — matching falls back to searching every
+   * profile, exactly as it did before this field existed.
+   */
+  category: string | null;
 }
 
 const SETTING_KEY = 'activityTeamIdentifiers';
@@ -25,9 +32,11 @@ function normalizeIdentifiers(value: unknown): ActivityTeamIdentifier[] {
       typeof (entry as { identifier?: unknown }).identifier === 'string' &&
       typeof (entry as { memberId?: unknown }).memberId === 'string'
     ) {
+      const category = (entry as { category?: unknown }).category;
       result.push({
         identifier: (entry as { identifier: string }).identifier,
         memberId: (entry as { memberId: string }).memberId,
+        category: typeof category === 'string' && category.trim().length > 0 ? category : null,
       });
     }
   }

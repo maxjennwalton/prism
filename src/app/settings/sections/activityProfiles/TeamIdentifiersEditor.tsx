@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Plus, X, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,31 +8,63 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { toast } from '@/components/ui/use-toast';
 import { useFamily } from '@/components/providers';
 import { useActivityTeamIdentifiers, type ActivityTeamIdentifier } from '@/lib/hooks/useActivityTeamIdentifiers';
+import { useActivityProfiles } from '@/lib/hooks/useActivityProfiles';
 
 interface DraftRow {
   /** Local-only React list key — never sent to the server. */
   key: string;
   identifier: string;
   memberId: string | null;
+  category: string;
 }
 
+const CATEGORY_SUGGESTIONS_LIST_ID = 'activity-identifier-category-suggestions';
+
 function toDraftRows(identifiers: ActivityTeamIdentifier[]): DraftRow[] {
-  return identifiers.map((i) => ({ key: crypto.randomUUID(), identifier: i.identifier, memberId: i.memberId }));
+  return identifiers.map((i) => ({
+    key: crypto.randomUUID(),
+    identifier: i.identifier,
+    memberId: i.memberId,
+    category: i.category ?? '',
+  }));
 }
 
 /**
  * Maps team codes / calendar tags (e.g. "U9MD", "Smith") to the family
- * member they belong to. Lives in Activity Profiles Settings, not Family
- * Members, because it is matching configuration, not a member attribute —
- * one member can have several identifiers, and identifiers only matter in
- * the context of activity matching.
+ * member they belong to, and optionally to an activity category (e.g.
+ * "Hockey"). Lives in Activity Profiles Settings, not Family Members,
+ * because it is matching configuration, not a member attribute — one
+ * member can have several identifiers, and identifiers only matter in the
+ * context of activity matching.
+ *
+ * Category is optional: a household with only one sport never needs it.
+ * Once configured, it becomes an authoritative constraint on matching for
+ * that identifier's events — see activityMatcher.ts.
  */
 export function TeamIdentifiersEditor() {
   const { members } = useFamily();
   const { identifiers, loading, saveIdentifiers } = useActivityTeamIdentifiers();
+  const { profiles } = useActivityProfiles();
   const [rows, setRows] = useState<DraftRow[]>([]);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  // Existing profile categories, offered as suggestions (not a fixed list —
+  // free text is still allowed, so a category can be set up here before its
+  // first Activity Profile exists).
+  const categorySuggestions = useMemo(() => {
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const p of profiles) {
+      const trimmed = p.category?.trim();
+      if (!trimmed) continue;
+      const key = trimmed.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push(trimmed);
+    }
+    return result;
+  }, [profiles]);
 
   useEffect(() => {
     if (!loading) {
@@ -49,7 +81,7 @@ export function TeamIdentifiersEditor() {
   };
 
   const addRow = () => {
-    setRows((prev) => [...prev, { key: crypto.randomUUID(), identifier: '', memberId: null }]);
+    setRows((prev) => [...prev, { key: crypto.randomUUID(), identifier: '', memberId: null, category: '' }]);
     setDirty(true);
   };
 
@@ -60,7 +92,7 @@ export function TeamIdentifiersEditor() {
 
   const handleSave = async () => {
     const trimmed = rows
-      .map((r) => ({ identifier: r.identifier.trim(), memberId: r.memberId }))
+      .map((r) => ({ identifier: r.identifier.trim(), memberId: r.memberId, category: r.category.trim() || null }))
       .filter((r): r is ActivityTeamIdentifier => r.identifier.length > 0 && Boolean(r.memberId));
 
     const seen = new Set<string>();
@@ -95,13 +127,20 @@ export function TeamIdentifiersEditor() {
         <h3 className="text-sm font-semibold">Team &amp; Calendar Identifiers</h3>
         <p className="text-sm text-muted-foreground">
           Map the team codes or calendar tags your activity calendars use (like &quot;U9MD&quot; or &quot;Smith&quot;) to the
-          family member they belong to. Matching uses this to figure out who an event is for.
+          family member they belong to. Add a category (like &quot;Hockey&quot;) when the same phrase — &quot;game&quot;,
+          &quot;practice&quot; — is used for more than one sport, so matching knows which profiles to consider.
         </p>
       </div>
 
+      <datalist id={CATEGORY_SUGGESTIONS_LIST_ID}>
+        {categorySuggestions.map((c) => (
+          <option key={c} value={c} />
+        ))}
+      </datalist>
+
       <div className="space-y-2">
         {rows.map((row) => (
-          <div key={row.key} className="flex items-center gap-2">
+          <div key={row.key} className="flex flex-wrap items-center gap-2">
             <Input
               value={row.identifier}
               onChange={(e) => updateRow(row.key, { identifier: e.target.value })}
@@ -111,7 +150,7 @@ export function TeamIdentifiersEditor() {
             />
             <span className="text-sm text-muted-foreground shrink-0">&rarr;</span>
             <Select value={row.memberId ?? undefined} onValueChange={(v) => updateRow(row.key, { memberId: v })}>
-              <SelectTrigger className="w-52" aria-label="Family member">
+              <SelectTrigger className="w-44" aria-label="Family member">
                 <SelectValue placeholder="Select a member" />
               </SelectTrigger>
               <SelectContent>
@@ -120,6 +159,15 @@ export function TeamIdentifiersEditor() {
                 ))}
               </SelectContent>
             </Select>
+            <span className="text-sm text-muted-foreground shrink-0">&rarr;</span>
+            <Input
+              value={row.category}
+              onChange={(e) => updateRow(row.key, { category: e.target.value })}
+              placeholder="Category (optional)"
+              className="w-44"
+              aria-label="Category"
+              list={CATEGORY_SUGGESTIONS_LIST_ID}
+            />
             <Button
               variant="ghost"
               size="icon"

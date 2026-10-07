@@ -18,6 +18,7 @@ const REVIEW_REASON_LABEL: Record<NonNullable<NeedsReviewItem['reviewReason']>, 
   ambiguous_profile: 'Could match more than one Activity Profile.',
   ambiguous_member: "Can't tell which family member this is for.",
   ambiguous_both: "Can't tell which profile or family member this is for.",
+  ambiguous_category: 'This event’s identifiers point to more than one category (e.g. Hockey and Soccer) — fix the category on one of them.',
 };
 
 function formatEventTime(iso: string): string {

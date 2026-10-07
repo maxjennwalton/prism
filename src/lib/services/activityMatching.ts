@@ -48,13 +48,21 @@ async function loadTeamIdentifiers(executor: DbExecutor): Promise<MatchTeamIdent
   const [row] = await executor.select().from(settings).where(eq(settings.key, 'activityTeamIdentifiers'));
   const value = row?.value;
   if (!Array.isArray(value)) return [];
-  return value.filter(
-    (v): v is MatchTeamIdentifier =>
-      Boolean(v) &&
-      typeof v === 'object' &&
-      typeof (v as { identifier?: unknown }).identifier === 'string' &&
-      typeof (v as { memberId?: unknown }).memberId === 'string',
-  );
+  return value
+    .filter(
+      (v): v is { identifier: string; memberId: string; category?: unknown } =>
+        Boolean(v) &&
+        typeof v === 'object' &&
+        typeof (v as { identifier?: unknown }).identifier === 'string' &&
+        typeof (v as { memberId?: unknown }).memberId === 'string',
+    )
+    .map((v) => ({
+      identifier: v.identifier,
+      memberId: v.memberId,
+      // Older rows (saved before category existed) simply lack this key —
+      // that's "no category configured", not a value to guess at.
+      category: typeof v.category === 'string' && v.category.trim().length > 0 ? v.category : null,
+    }));
 }
 
 /**
@@ -121,7 +129,7 @@ export async function matchEventsInRange(
     loadUnlinkedEventsInRange(executor, from, to),
   ]);
 
-  const activeProfiles = profiles.map((p) => ({ id: p.id, name: p.name, matchKeywords: p.matchKeywords }));
+  const activeProfiles = profiles.map((p) => ({ id: p.id, name: p.name, matchKeywords: p.matchKeywords, category: p.category }));
 
   const results: MatchEventSummary[] = [];
   let autoMatched = 0;
@@ -158,6 +166,8 @@ export async function matchEventsInRange(
             profileCandidates: result.profileCandidates,
             memberCandidates: result.memberCandidates,
             identifiersFound: result.identifiersFound,
+            resolvedCategory: result.resolvedCategory,
+            categoryCandidates: result.categoryCandidates,
           },
         },
         executor,
@@ -192,6 +202,8 @@ export interface NeedsReviewRow {
   profileCandidates: ActivityMatchMeta['profileCandidates'];
   memberCandidates: ActivityMatchMeta['memberCandidates'];
   identifiersFound: ActivityMatchMeta['identifiersFound'];
+  resolvedCategory: ActivityMatchMeta['resolvedCategory'];
+  categoryCandidates: ActivityMatchMeta['categoryCandidates'];
 }
 
 /** Every link still awaiting a human decision, oldest event first. */
@@ -222,6 +234,8 @@ export async function listNeedsReviewLinks(executor: DbExecutor = db): Promise<N
     profileCandidates: r.matchMeta?.profileCandidates ?? [],
     memberCandidates: r.matchMeta?.memberCandidates ?? [],
     identifiersFound: r.matchMeta?.identifiersFound ?? [],
+    resolvedCategory: r.matchMeta?.resolvedCategory ?? null,
+    categoryCandidates: r.matchMeta?.categoryCandidates ?? [],
   }));
 }
 
@@ -259,7 +273,7 @@ export async function reevaluateMatch(linkId: string, executor: DbExecutor = db)
     listActivityProfiles({}, executor),
     loadTeamIdentifiers(executor),
   ]);
-  const activeProfiles = profiles.map((p) => ({ id: p.id, name: p.name, matchKeywords: p.matchKeywords }));
+  const activeProfiles = profiles.map((p) => ({ id: p.id, name: p.name, matchKeywords: p.matchKeywords, category: p.category }));
 
   const result = matchEvent({
     title: row.eventTitle,
@@ -285,6 +299,8 @@ export async function reevaluateMatch(linkId: string, executor: DbExecutor = db)
         profileCandidates: result.profileCandidates,
         memberCandidates: result.memberCandidates,
         identifiersFound: result.identifiersFound,
+        resolvedCategory: result.resolvedCategory,
+        categoryCandidates: result.categoryCandidates,
       },
     },
     executor,

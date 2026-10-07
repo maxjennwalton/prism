@@ -12,6 +12,8 @@ function result(overrides: Partial<ActivityMatchResult>): ActivityMatchResult {
     profileCandidates: [],
     memberCandidates: [],
     identifiersFound: [],
+    resolvedCategory: null,
+    categoryCandidates: [],
     ...overrides,
   };
 }

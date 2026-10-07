@@ -1931,11 +1931,15 @@ export interface ActivityGearItem {
  * that reason.
  */
 export interface ActivityMatchMeta {
-  reviewReason: 'unclassified' | 'ambiguous_profile' | 'ambiguous_member' | 'ambiguous_both' | null;
+  reviewReason: 'unclassified' | 'ambiguous_profile' | 'ambiguous_member' | 'ambiguous_both' | 'ambiguous_category' | null;
   matchedPhrase: string | null;
   profileCandidates: { profileId: string; matchedPhrase: string }[];
   memberCandidates: string[];
   identifiersFound: string[];
+  /** The single category resolved from this event's matched identifiers, if exactly one; null otherwise (none, or conflicting — see categoryCandidates). */
+  resolvedCategory: string | null;
+  /** Every distinct category found among this event's matched identifiers. */
+  categoryCandidates: string[];
 }
 
 export const activityProfiles = pgTable('activity_profiles', {
