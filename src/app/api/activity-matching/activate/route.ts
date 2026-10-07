@@ -3,11 +3,9 @@ import { eq } from 'drizzle-orm';
 import { withAuth } from '@/lib/api/withAuth';
 import { db } from '@/lib/db/client';
 import { settings } from '@/lib/db/schema';
-import { matchEventsInRange, activityMatchingWindow } from '@/lib/services/activityMatching';
+import { matchEventsInRange, activityMatchingWindow, MATCHING_ENABLED_SETTING_KEY } from '@/lib/services/activityMatching';
 import { logActivity } from '@/lib/services/auditLog';
 import { logError } from '@/lib/utils/logError';
-
-export const ACTIVITY_MATCHING_ENABLED_SETTING_KEY = 'activityMatchingEnabled';
 
 /**
  * POST /api/activity-matching/activate
@@ -29,11 +27,11 @@ export async function POST() {
         const result = await matchEventsInRange(from, to, { persist: true, executor: tx });
 
         const value = { enabled: true, enabledAt: new Date().toISOString() };
-        const [existing] = await tx.select().from(settings).where(eq(settings.key, ACTIVITY_MATCHING_ENABLED_SETTING_KEY));
+        const [existing] = await tx.select().from(settings).where(eq(settings.key, MATCHING_ENABLED_SETTING_KEY));
         if (existing) {
-          await tx.update(settings).set({ value, updatedAt: new Date() }).where(eq(settings.key, ACTIVITY_MATCHING_ENABLED_SETTING_KEY));
+          await tx.update(settings).set({ value, updatedAt: new Date() }).where(eq(settings.key, MATCHING_ENABLED_SETTING_KEY));
         } else {
-          await tx.insert(settings).values({ key: ACTIVITY_MATCHING_ENABLED_SETTING_KEY, value });
+          await tx.insert(settings).values({ key: MATCHING_ENABLED_SETTING_KEY, value });
         }
 
         return result;

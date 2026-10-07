@@ -84,7 +84,8 @@ async function loadUnlinkedEventsInRange(executor: DbExecutor, from: Date, to: D
     );
 }
 
-const MATCHING_ENABLED_SETTING_KEY = 'activityMatchingEnabled';
+/** Settings key read by the client's useActivityMatchingStatus hook too — keep both in sync if this ever changes. */
+export const MATCHING_ENABLED_SETTING_KEY = 'activityMatchingEnabled';
 
 async function isMatchingEnabled(executor: DbExecutor): Promise<boolean> {
   const [row] = await executor.select().from(settings).where(eq(settings.key, MATCHING_ENABLED_SETTING_KEY));
