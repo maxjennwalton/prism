@@ -15,7 +15,7 @@
 import { and, asc, eq, gte, isNull, lte } from 'drizzle-orm';
 import { db, type DbExecutor } from '@/lib/db/client';
 import { events, calendarSources, calendarGroups, activityEventLinks, settings, type ActivityMatchMeta } from '@/lib/db/schema';
-import { listActivityProfiles, createActivityEventLinkIfAbsent } from '@/lib/db/activityProfiles';
+import { listActivityProfiles, createActivityEventLinkIfAbsent, updateActivityEventLink } from '@/lib/db/activityProfiles';
 import { matchEvent, type MatchResult, type MatchTeamIdentifier } from '@/lib/matching/activityMatcher';
 
 /**
@@ -214,4 +214,72 @@ export async function listNeedsReviewLinks(executor: DbExecutor = db): Promise<N
     memberCandidates: r.matchMeta?.memberCandidates ?? [],
     identifiersFound: r.matchMeta?.identifiersFound ?? [],
   }));
+}
+
+export interface ReevaluateResult {
+  link: typeof activityEventLinks.$inferSelect;
+  /** False when the fresh result was "ignore" — nothing is applied rather than guessing what that should do to an existing row. */
+  changed: boolean;
+}
+
+/**
+ * Explicit, one-off reuse of the pure matcher against a single existing
+ * link — e.g. after editing a profile's keywords or adding an identifier,
+ * to see whether this one event would resolve differently now. Unlike
+ * every other path in this file, this intentionally DOES touch an existing
+ * row: it's a direct human request, not automatic matching, so the
+ * "existing link row is never touched by automatic matching" invariant
+ * doesn't apply here.
+ */
+export async function reevaluateMatch(linkId: string, executor: DbExecutor = db): Promise<ReevaluateResult | null> {
+  const [row] = await executor
+    .select({
+      eventId: activityEventLinks.eventId,
+      eventTitle: events.title,
+      calendarGroupMemberId: calendarGroups.userId,
+    })
+    .from(activityEventLinks)
+    .innerJoin(events, eq(activityEventLinks.eventId, events.id))
+    .leftJoin(calendarSources, eq(events.calendarSourceId, calendarSources.id))
+    .leftJoin(calendarGroups, and(eq(calendarSources.groupId, calendarGroups.id), eq(calendarGroups.type, 'user')))
+    .where(eq(activityEventLinks.id, linkId));
+
+  if (!row) return null;
+
+  const [profiles, teamIdentifiers] = await Promise.all([
+    listActivityProfiles({}, executor),
+    loadTeamIdentifiers(executor),
+  ]);
+  const activeProfiles = profiles.map((p) => ({ id: p.id, name: p.name, matchKeywords: p.matchKeywords }));
+
+  const result = matchEvent({
+    title: row.eventTitle,
+    activeProfiles,
+    teamIdentifiers,
+    calendarGroupMemberId: row.calendarGroupMemberId,
+  });
+
+  if (result.outcome === 'ignore') {
+    const [existing] = await executor.select().from(activityEventLinks).where(eq(activityEventLinks.id, linkId));
+    return { link: existing!, changed: false };
+  }
+
+  const updated = await updateActivityEventLink(
+    linkId,
+    {
+      activityProfileId: result.profileId,
+      assignedMemberId: result.memberId,
+      matchStatus: result.matchStatus,
+      matchMeta: {
+        reviewReason: result.reviewReason,
+        matchedPhrase: result.matchedPhrase,
+        profileCandidates: result.profileCandidates,
+        memberCandidates: result.memberCandidates,
+        identifiersFound: result.identifiersFound,
+      },
+    },
+    executor,
+  );
+
+  return { link: updated!, changed: true };
 }
