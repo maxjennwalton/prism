@@ -37,8 +37,8 @@ export interface CreateActivityProfileInput {
   createdBy?: string | null;
 }
 
-export async function listActivityProfiles(opts: { includeArchived?: boolean } = {}) {
-  const rows = await db.select().from(activityProfiles).orderBy(asc(activityProfiles.name));
+export async function listActivityProfiles(opts: { includeArchived?: boolean } = {}, executor: DbExecutor = db) {
+  const rows = await executor.select().from(activityProfiles).orderBy(asc(activityProfiles.name));
   return opts.includeArchived ? rows : rows.filter((p) => !p.archived);
 }
 
