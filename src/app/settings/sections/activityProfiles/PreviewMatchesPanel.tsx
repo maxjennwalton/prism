@@ -85,6 +85,20 @@ export function PreviewMatchesPanel({ profilesVersion }: { profilesVersion: numb
 
   const nameOf = (id: string | null, names: Map<string, string>) => (id ? names.get(id) ?? 'Unknown' : '—');
 
+  /**
+   * No profile was assigned (profileId is null — the review needs a human),
+   * but a specific profile is why this row needs review at all (e.g.
+   * category_unresolved's excluded-but-keyword-matching profile). Shows it
+   * with a "?" so it reads as "this is what triggered the review", never
+   * as an assigned match.
+   */
+  const profileLabel = (row: ActivityMatchEventSummary): string => {
+    if (row.result.profileId) return nameOf(row.result.profileId, profileNames);
+    const candidateIds = Array.from(new Set(row.result.profileCandidates.map((c) => c.profileId)));
+    if (candidateIds.length === 0) return '—';
+    return `${candidateIds.map((id) => profileNames.get(id) ?? 'Unknown').join(', ')}?`;
+  };
+
   const visibleResults = useMemo(
     () => (summary ? filterPreviewResults(summary.results, filter) : []),
     [summary, filter],
@@ -155,7 +169,7 @@ export function PreviewMatchesPanel({ profilesVersion }: { profilesVersion: numb
                       <div className="text-xs text-muted-foreground text-right shrink-0">
                         {row.result.outcome !== 'ignore' && (
                           <div>
-                            {nameOf(row.result.profileId, profileNames)} · {nameOf(row.result.memberId, memberNames)}
+                            {profileLabel(row)} · {nameOf(row.result.memberId, memberNames)}
                           </div>
                         )}
                       </div>

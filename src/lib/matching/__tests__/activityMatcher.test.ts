@@ -423,7 +423,12 @@ describe('matchEvent — category-constrained matching', () => {
     expect(result.profileId).toBe('p-hockey-game');
   });
 
-  it('no category configured on the matched identifier preserves today\'s behavior: searches every profile, so a genuinely ambiguous generic phrase is still flagged ambiguous_profile', () => {
+  it('no category configured on the matched identifier is still "no category evidence" — a generic phrase that only matches categorized profiles is category_unresolved, never ambiguous_profile', () => {
+    // An identifier matched (so this clearly looks like an activity), but it
+    // carries no category — exactly as uninformative about category as no
+    // identifier matching at all. Both Hockey Game and Soccer Game are
+    // categorized, so neither may compete; this is not the old
+    // "ambiguous_profile" tie, it's "the category couldn't be determined".
     const noCategoryIdentifier: MatchTeamIdentifier = { identifier: 'U9MD', memberId: beckhamId, category: null };
     const result = matchEvent({
       title: 'U9MD Game',
@@ -432,8 +437,160 @@ describe('matchEvent — category-constrained matching', () => {
       calendarGroupMemberId: null,
     });
     expect(result.outcome).toBe('needs_review');
-    expect(result.reviewReason).toBe('ambiguous_profile');
+    expect(result.reviewReason).toBe('category_unresolved');
+    expect(result.profileId).toBeNull();
     expect(result.profileCandidates.map((c) => c.profileId).sort()).toEqual(['p-hockey-game', 'p-soccer-game']);
     expect(result.resolvedCategory).toBeNull();
+  });
+});
+
+describe('matchEvent — a categorized profile must not claim a category-unknown event (real bug report)', () => {
+  const hockeyGameCat: MatchProfileCandidate = { id: 'p-hockey-game', name: 'Hockey Game', matchKeywords: ['Game'], category: 'Hockey' };
+  const hockeyPracticeCat: MatchProfileCandidate = { id: 'p-hockey-practice', name: 'Hockey Practice', matchKeywords: ['Practice'], category: 'Hockey' };
+  const soccerGameCat: MatchProfileCandidate = { id: 'p-soccer-game', name: 'Soccer Game', matchKeywords: ['Game'], category: 'Soccer' };
+
+  const u9mdHockey: MatchTeamIdentifier = { identifier: 'U9MD', memberId: beckhamId, category: 'Hockey' };
+  const u11ll1Hockey: MatchTeamIdentifier = { identifier: 'U11LL1', memberId: theoId, category: 'Hockey' };
+
+  // Only Hockey profiles + Hockey identifiers are configured — mirrors the
+  // real household's setup at the time the bug was reported, before any
+  // Soccer identifier existed.
+  const hockeyOnlyProfiles = [hockeyGameCat, hockeyPracticeCat];
+  const hockeyOnlyIdentifiers = [u9mdHockey, u11ll1Hockey];
+
+  it('REGRESSION: a real soccer calendar title containing "Game" cannot be assigned Hockey Game when no Hockey identifier is present', () => {
+    // The exact title shape reported: no U9MD/U11LL1 anywhere in it, so no
+    // identifier matches and no category context resolves at all.
+    const result = matchEvent({
+      title: '2026/27 Youth Sports Programs - Soccer Programs - Grasshoppers vs Sharks - Game',
+      activeProfiles: hockeyOnlyProfiles,
+      teamIdentifiers: hockeyOnlyIdentifiers,
+      calendarGroupMemberId: null,
+    });
+
+    expect(result.outcome).toBe('needs_review');
+    expect(result.reviewReason).toBe('category_unresolved');
+    // The crux of the bug: Hockey Game must never be assigned.
+    expect(result.profileId).toBeNull();
+    expect(result.matchedPhrase).toBeNull();
+    expect(result.profileId).not.toBe('p-hockey-game');
+    // Still surfaced for a human to see what triggered the review (Preview
+    // shows this), without it ever being treated as an assigned match.
+    expect(result.profileCandidates.map((c) => c.profileId)).toContain('p-hockey-game');
+    expect(result.resolvedCategory).toBeNull();
+    expect(result.identifiersFound).toEqual([]);
+  });
+
+  it('a category-unknown title matching several categorized profiles lists all of them as candidates, still unassigned', () => {
+    const result = matchEvent({
+      title: 'Youth Sports Programs - Game Night',
+      activeProfiles: [hockeyGameCat, soccerGameCat],
+      teamIdentifiers: hockeyOnlyIdentifiers,
+      calendarGroupMemberId: null,
+    });
+    expect(result.reviewReason).toBe('category_unresolved');
+    expect(result.profileId).toBeNull();
+    expect(result.profileCandidates.map((c) => c.profileId).sort()).toEqual(['p-hockey-game', 'p-soccer-game']);
+  });
+
+  it('a category-unknown title that matches no profile at all (not even a categorized one) still falls through to ignore, unchanged', () => {
+    const result = matchEvent({
+      title: 'Random Soccer Programs Newsletter',
+      activeProfiles: hockeyOnlyProfiles,
+      teamIdentifiers: hockeyOnlyIdentifiers,
+      calendarGroupMemberId: null,
+    });
+    expect(result.outcome).toBe('ignore');
+    expect(result.reviewReason).toBeNull();
+    expect(result.profileCandidates).toEqual([]);
+  });
+
+  it('REGRESSION: existing U9MD/U11LL1 Hockey matching is completely unchanged by this fix', () => {
+    const u9mdResult = matchEvent({
+      title: 'U9MD - Game vs Wasaga Beach Stars',
+      activeProfiles: hockeyOnlyProfiles,
+      teamIdentifiers: hockeyOnlyIdentifiers,
+      calendarGroupMemberId: null,
+    });
+    expect(u9mdResult.outcome).toBe('auto_match');
+    expect(u9mdResult.profileId).toBe('p-hockey-game');
+    expect(u9mdResult.memberId).toBe(beckhamId);
+    expect(u9mdResult.resolvedCategory).toBe('Hockey');
+
+    const u11ll1Result = matchEvent({
+      title: 'U11LL1 Practice',
+      activeProfiles: hockeyOnlyProfiles,
+      teamIdentifiers: hockeyOnlyIdentifiers,
+      calendarGroupMemberId: null,
+    });
+    expect(u11ll1Result.outcome).toBe('auto_match');
+    expect(u11ll1Result.profileId).toBe('p-hockey-practice');
+    expect(u11ll1Result.memberId).toBe(theoId);
+    expect(u11ll1Result.resolvedCategory).toBe('Hockey');
+  });
+
+  it('REGRESSION: the SAME profile set correctly auto-matches a real Hockey event and flags the real Soccer event for review, side by side', () => {
+    const hockeyEvent = matchEvent({
+      title: 'U9MD - Game vs Wasaga Beach Stars',
+      activeProfiles: hockeyOnlyProfiles,
+      teamIdentifiers: hockeyOnlyIdentifiers,
+      calendarGroupMemberId: null,
+    });
+    const soccerEvent = matchEvent({
+      title: '2026/27 Youth Sports Programs - Soccer Programs - Grasshoppers vs Sharks - Game',
+      activeProfiles: hockeyOnlyProfiles,
+      teamIdentifiers: hockeyOnlyIdentifiers,
+      calendarGroupMemberId: null,
+    });
+
+    expect(hockeyEvent.outcome).toBe('auto_match');
+    expect(hockeyEvent.profileId).toBe('p-hockey-game');
+
+    expect(soccerEvent.outcome).toBe('needs_review');
+    expect(soccerEvent.reviewReason).toBe('category_unresolved');
+    expect(soccerEvent.profileId).toBeNull();
+  });
+});
+
+describe('matchEvent — uncategorized Activity Profiles continue to work normally', () => {
+  const familyOuting: MatchProfileCandidate = { id: 'p-family-outing', name: 'Family Outing', matchKeywords: ['Outing', 'Trip'], category: null };
+  const gameNight: MatchProfileCandidate = { id: 'p-game-night', name: 'Game Night', matchKeywords: ['Game'], category: null };
+  const hockeyGameCat: MatchProfileCandidate = { id: 'p-hockey-game', name: 'Hockey Game', matchKeywords: ['Game'], category: 'Hockey' };
+
+  it('an uncategorized profile auto-matches a category-unknown title exactly as before category matching existed', () => {
+    const result = matchEvent({
+      title: 'Family Trip to the Cottage',
+      activeProfiles: [familyOuting],
+      teamIdentifiers: [],
+      calendarGroupMemberId: 'member-1',
+    });
+    expect(result.outcome).toBe('auto_match');
+    expect(result.profileId).toBe('p-family-outing');
+  });
+
+  it('a household with no categories adopted anywhere is fully unaffected: ambiguity among uncategorized profiles still resolves the same way', () => {
+    const ambiguousPair: MatchProfileCandidate = { id: 'p-game-night-2', name: 'Trivia Game Night', matchKeywords: ['Game'], category: null };
+    const result = matchEvent({
+      title: 'Game Night at the Community Center',
+      activeProfiles: [gameNight, ambiguousPair],
+      teamIdentifiers: [],
+      calendarGroupMemberId: 'member-1',
+    });
+    // Both are uncategorized and both match "Game" with equal specificity —
+    // this is an ordinary tie, nothing to do with category_unresolved.
+    expect(result.outcome).toBe('needs_review');
+    expect(result.reviewReason).toBe('ambiguous_profile');
+  });
+
+  it('mixed household: when a categorized profile and an uncategorized profile both match a category-unknown title, the uncategorized one wins — the categorized one is excluded, not merely outscored', () => {
+    const result = matchEvent({
+      title: 'Game Night',
+      activeProfiles: [hockeyGameCat, gameNight],
+      teamIdentifiers: [],
+      calendarGroupMemberId: 'member-1',
+    });
+    expect(result.outcome).toBe('auto_match');
+    expect(result.profileId).toBe('p-game-night');
+    expect(result.profileCandidates.map((c) => c.profileId)).not.toContain('p-hockey-game');
   });
 });

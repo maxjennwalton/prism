@@ -11,7 +11,14 @@ export interface ActivityMatchResult {
   profileId: string | null;
   memberId: string | null;
   matchStatus: 'auto_confirmed' | 'needs_review' | null;
-  reviewReason: 'unclassified' | 'ambiguous_profile' | 'ambiguous_member' | 'ambiguous_both' | 'ambiguous_category' | null;
+  reviewReason:
+    | 'unclassified'
+    | 'ambiguous_profile'
+    | 'ambiguous_member'
+    | 'ambiguous_both'
+    | 'ambiguous_category'
+    | 'category_unresolved'
+    | null;
   matchedPhrase: string | null;
   profileCandidates: { profileId: string; matchedPhrase: string }[];
   memberCandidates: string[];

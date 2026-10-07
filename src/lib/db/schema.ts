@@ -1931,7 +1931,14 @@ export interface ActivityGearItem {
  * that reason.
  */
 export interface ActivityMatchMeta {
-  reviewReason: 'unclassified' | 'ambiguous_profile' | 'ambiguous_member' | 'ambiguous_both' | 'ambiguous_category' | null;
+  reviewReason:
+    | 'unclassified'
+    | 'ambiguous_profile'
+    | 'ambiguous_member'
+    | 'ambiguous_both'
+    | 'ambiguous_category'
+    | 'category_unresolved'
+    | null;
   matchedPhrase: string | null;
   profileCandidates: { profileId: string; matchedPhrase: string }[];
   memberCandidates: string[];

@@ -13,12 +13,23 @@ import {
   type NeedsReviewItem,
 } from '@/lib/hooks/useActivityMatchingNeedsReview';
 
-const REVIEW_REASON_LABEL: Record<NonNullable<NeedsReviewItem['reviewReason']>, string> = {
-  unclassified: "Looks like an activity, but doesn't match any profile yet.",
-  ambiguous_profile: 'Could match more than one Activity Profile.',
-  ambiguous_member: "Can't tell which family member this is for.",
-  ambiguous_both: "Can't tell which profile or family member this is for.",
-  ambiguous_category: 'This event’s identifiers point to more than one category (e.g. Hockey and Soccer) — fix the category on one of them.',
+interface ReviewReasonCopy {
+  /** Short, bold lead-in shown above the description — only reasons that need one set it. */
+  title?: string;
+  description: string;
+}
+
+const REVIEW_REASON_LABEL: Record<NonNullable<NeedsReviewItem['reviewReason']>, ReviewReasonCopy> = {
+  unclassified: { description: "Looks like an activity, but doesn't match any profile yet." },
+  ambiguous_profile: { description: 'Could match more than one Activity Profile.' },
+  ambiguous_member: { description: "Can't tell which family member this is for." },
+  ambiguous_both: { description: "Can't tell which profile or family member this is for." },
+  ambiguous_category: { description: 'This event’s identifiers point to more than one category (e.g. Hockey and Soccer) — fix the category on one of them.' },
+  category_unresolved: {
+    title: 'Category needed',
+    description:
+      "This event looks like an activity, but Prism can't tell which activity category it belongs to. Add or update a Team & Calendar Identifier, or review the match manually.",
+  },
 };
 
 function formatEventTime(iso: string): string {
@@ -76,7 +87,12 @@ function NeedsReviewRow({
         <div className="font-medium truncate">{item.eventTitle}</div>
         <div className="text-xs text-muted-foreground">{formatEventTime(item.eventStartTime)}</div>
         {item.reviewReason && (
-          <div className="text-xs text-muted-foreground italic mt-0.5">{REVIEW_REASON_LABEL[item.reviewReason]}</div>
+          <div className="text-xs text-muted-foreground mt-0.5">
+            {REVIEW_REASON_LABEL[item.reviewReason].title && (
+              <div className="font-medium text-foreground">{REVIEW_REASON_LABEL[item.reviewReason].title}</div>
+            )}
+            <div className="italic">{REVIEW_REASON_LABEL[item.reviewReason].description}</div>
+          </div>
         )}
       </div>
 

@@ -14,7 +14,11 @@
  *    imply (e.g. "Hockey") — when exactly one resolves, it's an
  *    AUTHORITATIVE constraint on which profiles are even considered, so a
  *    generic phrase like "game" can never cross from one sport to another.
- *    See matchEvent's doc comment for the full category rules.
+ *    The same protection runs in the other direction too: when NO category
+ *    resolves (no identifier matched at all), a categorized profile is
+ *    just as off-limits as a wrong-category one would be — only
+ *    uncategorized profiles may compete for a category-blind title. See
+ *    matchEvent's doc comment for the full category rules.
  * Ambiguity in any signal (or no activity-profile match at all, when the
  * title still looks like an activity) routes to `needs_review` rather than
  * guessing — this engine never silently resolves a tie.
@@ -50,7 +54,13 @@ export interface MatchInput {
 
 export type MatchOutcome = 'auto_match' | 'needs_review' | 'ignore';
 export type MatchStatus = 'auto_confirmed' | 'needs_review';
-export type MatchReviewReason = 'unclassified' | 'ambiguous_profile' | 'ambiguous_member' | 'ambiguous_both' | 'ambiguous_category';
+export type MatchReviewReason =
+  | 'unclassified'
+  | 'ambiguous_profile'
+  | 'ambiguous_member'
+  | 'ambiguous_both'
+  | 'ambiguous_category'
+  | 'category_unresolved';
 
 export interface ProfileCandidateResult {
   profileId: string;
@@ -237,8 +247,20 @@ function categoryMatches(profileCategory: string | null, resolvedCategory: strin
  *
  * Category behavior:
  *  - No identifier matched, or none of the matched identifiers carry a
- *    category -> no context; every active profile is a candidate, exactly
- *    as before this feature existed (backwards compatible default).
+ *    category -> no context. Only UNCATEGORIZED profiles (category: null)
+ *    may compete — a household that has never adopted categories has no
+ *    categorized profiles, so this is a no-op for them (fully backwards
+ *    compatible); a household that has adopted them gets the real
+ *    protection: a categorized profile's own generic keyword ("game",
+ *    "practice") can no longer win a category-blind event just because
+ *    nothing else was configured to claim it.
+ *      - If that leaves zero matches, but a categorized profile would have
+ *        matched the title on keyword alone, this isn't "not an activity"
+ *        - it's "an activity whose category couldn't be determined" ->
+ *        needs_review/category_unresolved, profileId null (never assigned
+ *        from a category-blind match), with the would-have-matched
+ *        categorized profile(s) surfaced as profileCandidates purely so a
+ *        human reviewing it can see what triggered the review.
  *  - Exactly one distinct category resolved -> AUTHORITATIVE constraint:
  *    only profiles whose own category normalizes-equal to it are
  *    considered. There is no fallback to the full profile set if that
@@ -296,7 +318,7 @@ export function matchEvent(input: MatchInput): MatchResult {
 
   const candidateProfiles = categoryContext.resolved !== null
     ? input.activeProfiles.filter((p) => categoryMatches(p.category, categoryContext.resolved!))
-    : input.activeProfiles;
+    : input.activeProfiles.filter((p) => p.category === null);
 
   const profileMatches = findMatchingProfiles(input.title, candidateProfiles);
   const profileResolution = resolveProfileCandidate(profileMatches);
@@ -307,6 +329,33 @@ export function matchEvent(input: MatchInput): MatchResult {
   }));
 
   if (profileMatches.length === 0) {
+    // No category context resolved, so every categorized profile was just
+    // excluded above as a candidate. If one of THOSE would otherwise have
+    // matched this title, it's not "no activity" — it's "an activity whose
+    // category couldn't be determined". Surface it for a human (never
+    // assign it) rather than falling through to ignore/unclassified below.
+    if (categoryContext.resolved === null) {
+      const categorizedShadowMatches = findMatchingProfiles(
+        input.title,
+        input.activeProfiles.filter((p) => p.category !== null),
+      );
+      if (categorizedShadowMatches.length > 0) {
+        return {
+          outcome: 'needs_review',
+          profileId: null,
+          memberId: resolvedMemberId,
+          matchStatus: 'needs_review',
+          reviewReason: 'category_unresolved',
+          matchedPhrase: null,
+          profileCandidates: categorizedShadowMatches.map((m) => ({ profileId: m.profileId, matchedPhrase: m.matchedPhrase })),
+          memberCandidates,
+          identifiersFound,
+          resolvedCategory: null,
+          categoryCandidates: categoryContext.candidates,
+        };
+      }
+    }
+
     const potentialActivity = identifierMatches.length > 0;
     if (!potentialActivity) {
       return {
