@@ -4,6 +4,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/com
 import { TeamIdentifiersEditor } from './TeamIdentifiersEditor';
 import { MatchingStatusPanel } from './MatchingStatusPanel';
 import { PreviewMatchesPanel } from './PreviewMatchesPanel';
+import { NeedsReviewPanel } from './NeedsReviewPanel';
 
 /**
  * Activity Matching settings: configuring identifiers, enabling/disabling
@@ -24,6 +25,7 @@ export function ActivityMatchingCard() {
         <TeamIdentifiersEditor />
         <MatchingStatusPanel />
         <PreviewMatchesPanel />
+        <NeedsReviewPanel />
       </CardContent>
     </Card>
   );

@@ -455,6 +455,21 @@ export const setActivityGearCompletionSchema = z.object({
   checked: z.boolean(),
 });
 
+// A human resolving a needs_review activity_event_links row (Phase 3). Either
+// confirm it (optionally having changed the proposed profile/member first) or
+// say it's not an activity at all — the only two ways a needs_review row ever
+// gets settled.
+export const activityMatchReviewDecisionSchema = z.discriminatedUnion('decision', [
+  z.object({
+    decision: z.literal('confirm'),
+    activityProfileId: uuidSchema.nullable(),
+    assignedMemberId: uuidSchema.nullable(),
+  }),
+  z.object({
+    decision: z.literal('reject'),
+  }),
+]);
+
 // HELPER FUNCTION
 
 /**

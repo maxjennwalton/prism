@@ -12,9 +12,9 @@
  * pass on every sync, which naturally catches newly-synced events as they
  * enter the window and naturally skips anything already linked.
  */
-import { and, eq, gte, isNull, lte } from 'drizzle-orm';
+import { and, asc, eq, gte, isNull, lte } from 'drizzle-orm';
 import { db, type DbExecutor } from '@/lib/db/client';
-import { events, calendarSources, calendarGroups, activityEventLinks, settings } from '@/lib/db/schema';
+import { events, calendarSources, calendarGroups, activityEventLinks, settings, type ActivityMatchMeta } from '@/lib/db/schema';
 import { listActivityProfiles, createActivityEventLinkIfAbsent } from '@/lib/db/activityProfiles';
 import { matchEvent, type MatchResult, type MatchTeamIdentifier } from '@/lib/matching/activityMatcher';
 
@@ -170,4 +170,48 @@ export async function runActivityMatchingTick(): Promise<MatchRangeSummary | nul
   if (!(await isMatchingEnabled(db))) return null;
   const { from, to } = activityMatchingWindow();
   return matchEventsInRange(from, to, { persist: true });
+}
+
+export interface NeedsReviewRow {
+  id: string;
+  eventId: string;
+  eventTitle: string;
+  eventStartTime: Date;
+  activityProfileId: string | null;
+  assignedMemberId: string | null;
+  reviewReason: ActivityMatchMeta['reviewReason'];
+  profileCandidates: ActivityMatchMeta['profileCandidates'];
+  memberCandidates: ActivityMatchMeta['memberCandidates'];
+  identifiersFound: ActivityMatchMeta['identifiersFound'];
+}
+
+/** Every link still awaiting a human decision, oldest event first. */
+export async function listNeedsReviewLinks(executor: DbExecutor = db): Promise<NeedsReviewRow[]> {
+  const rows = await executor
+    .select({
+      id: activityEventLinks.id,
+      eventId: activityEventLinks.eventId,
+      activityProfileId: activityEventLinks.activityProfileId,
+      assignedMemberId: activityEventLinks.assignedMemberId,
+      matchMeta: activityEventLinks.matchMeta,
+      eventTitle: events.title,
+      eventStartTime: events.startTime,
+    })
+    .from(activityEventLinks)
+    .innerJoin(events, eq(activityEventLinks.eventId, events.id))
+    .where(eq(activityEventLinks.matchStatus, 'needs_review'))
+    .orderBy(asc(events.startTime));
+
+  return rows.map((r) => ({
+    id: r.id,
+    eventId: r.eventId,
+    eventTitle: r.eventTitle,
+    eventStartTime: r.eventStartTime,
+    activityProfileId: r.activityProfileId,
+    assignedMemberId: r.assignedMemberId,
+    reviewReason: r.matchMeta?.reviewReason ?? null,
+    profileCandidates: r.matchMeta?.profileCandidates ?? [],
+    memberCandidates: r.matchMeta?.memberCandidates ?? [],
+    identifiersFound: r.matchMeta?.identifiersFound ?? [],
+  }));
 }
