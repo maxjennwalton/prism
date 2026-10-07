@@ -2,6 +2,7 @@
 
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { TeamIdentifiersEditor } from './TeamIdentifiersEditor';
+import { MatchingStatusPanel } from './MatchingStatusPanel';
 import { PreviewMatchesPanel } from './PreviewMatchesPanel';
 
 /**
@@ -21,6 +22,7 @@ export function ActivityMatchingCard() {
       </CardHeader>
       <CardContent className="space-y-6">
         <TeamIdentifiersEditor />
+        <MatchingStatusPanel />
         <PreviewMatchesPanel />
       </CardContent>
     </Card>
