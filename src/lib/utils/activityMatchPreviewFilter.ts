@@ -14,7 +14,7 @@ export type PreviewFilter = (typeof PREVIEW_FILTERS)[number];
 export const PREVIEW_FILTER_LABEL: Record<PreviewFilter, string> = {
   all: 'All',
   auto_match: 'Auto Match',
-  needs_review: 'Needs Review',
+  needs_review: 'Review Required',
   ignore: 'Not an Activity',
 };
 

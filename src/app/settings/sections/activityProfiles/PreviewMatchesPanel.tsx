@@ -29,7 +29,7 @@ function outcomeBadge(row: ActivityMatchEventSummary) {
     return <Badge variant="default">Would auto-match</Badge>;
   }
   if (row.result.outcome === 'needs_review') {
-    return <Badge variant="secondary">Would need review</Badge>;
+    return <Badge variant="secondary">Review Required</Badge>;
   }
   return <Badge variant="outline">Not an activity</Badge>;
 }

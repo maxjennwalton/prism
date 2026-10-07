@@ -139,7 +139,7 @@ export function NeedsReviewPanel() {
   return (
     <div className="space-y-3">
       <div>
-        <h3 className="text-sm font-semibold">Needs Review ({items.length})</h3>
+        <h3 className="text-sm font-semibold">Review Required ({items.length})</h3>
         <p className="text-sm text-muted-foreground">
           These events couldn&apos;t be matched automatically. Confirm the right profile and member, or mark them as not an activity.
         </p>
