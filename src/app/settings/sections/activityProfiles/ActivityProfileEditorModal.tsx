@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { X, Plus } from 'lucide-react';
 import {
   Dialog,
@@ -71,6 +71,17 @@ export function ActivityProfileEditorModal({
   const [loading, setLoading] = useState(Boolean(profileId));
   const [saving, setSaving] = useState(false);
 
+  // ActivityProfilesSection passes onClose/onSaved as inline arrow functions,
+  // so it hands this component a brand-new reference on every one of ITS OWN
+  // renders — the parent re-rendering for a reason that has nothing to do
+  // with this modal (e.g. its own list state) is unrelated to whether this
+  // editor should reload. Reading onClose through a ref keeps the load
+  // effect depending only on profileId, so a parent re-render while editing
+  // the same profile can never re-fire the fetch and clobber an in-progress
+  // edit with the still-unedited server copy.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
   useEffect(() => {
     if (!profileId) return;
     let active = true;
@@ -100,11 +111,11 @@ export function ActivityProfileEditorModal({
       })
       .catch((err) => {
         toast({ title: err instanceof Error ? err.message : 'Failed to load activity profile', variant: 'destructive' });
-        onClose();
+        onCloseRef.current();
       })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [profileId, onClose]);
+  }, [profileId]);
 
   const familyMemberOptions = useMemo(
     () => members.map((m) => ({ id: m.id, name: m.name })),
@@ -289,7 +300,7 @@ export function ActivityProfileEditorModal({
               <CardHeader>
                 <CardTitle className="text-base">Automatic Matching</CardTitle>
                 <CardDescription>
-                  These phrases will eventually help Prism recognize matching calendar events automatically — you&apos;ll always be able to review and correct every match. This isn&apos;t active yet; for now it just saves your keywords.
+                  Add words or phrases Prism can use to recognize calendar events that belong to this Activity Profile.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-2">

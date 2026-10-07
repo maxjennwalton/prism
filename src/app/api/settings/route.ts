@@ -1,16 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireRole, getDisplayAuth } from '@/lib/auth';
-import { db } from '@/lib/db/client';
+import { db, type DbExecutor } from '@/lib/db/client';
 import { settings } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { logActivity } from '@/lib/services/auditLog';
 import { invalidateEntity } from '@/lib/cache/cacheKeys';
+import { reevaluateAllNeedsReview } from '@/lib/services/activityMatching';
 import type { AuthResult } from '@/lib/auth';
 import { logError } from '@/lib/utils/logError';
 import { PIN_LENGTH_SETTING_KEY } from '@/lib/constants';
 import { isSetupComplete } from '@/lib/setup';
 import { getBuiltinTheme } from '@/lib/themes/appThemes';
 import { isInstallableTheme, MAX_INSTALLED_THEMES } from '@/lib/themes/tokens';
+
+/** Settings key the Activity Profiles UI stores Team & Calendar Identifiers under. */
+const ACTIVITY_TEAM_IDENTIFIERS_SETTING_KEY = 'activityTeamIdentifiers';
 
 export async function GET() {
   const auth = await getDisplayAuth();
@@ -115,15 +119,33 @@ export async function PATCH(request: NextRequest) {
       .from(settings)
       .where(eq(settings.key, body.key));
 
-    if (existing) {
-      await db
-        .update(settings)
-        .set({ value: body.value, updatedAt: new Date() })
-        .where(eq(settings.key, body.key));
+    const upsertSetting = async (executor: DbExecutor) => {
+      if (existing) {
+        await executor
+          .update(settings)
+          .set({ value: body.value, updatedAt: new Date() })
+          .where(eq(settings.key, body.key));
+      } else {
+        await executor
+          .insert(settings)
+          .values({ key: body.key, value: body.value });
+      }
+    };
+
+    if (body.key === ACTIVITY_TEAM_IDENTIFIERS_SETTING_KEY) {
+      // Editing (or clearing) Team & Calendar Identifiers can be exactly
+      // what an existing Review Required event was waiting on — a
+      // member/category correction, or a brand-new identifier — so the
+      // save and the automatic re-evaluation of every open needs_review
+      // link run as one transaction. reevaluateAllNeedsReview never
+      // touches a confirmed, rejected, or auto_confirmed link, and is a
+      // no-op entirely when matching is off.
+      await db.transaction(async (tx) => {
+        await upsertSetting(tx);
+        await reevaluateAllNeedsReview(tx);
+      });
     } else {
-      await db
-        .insert(settings)
-        .values({ key: body.key, value: body.value });
+      await upsertSetting(db);
     }
 
     if (auth) {

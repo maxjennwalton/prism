@@ -32,9 +32,23 @@ jest.mock('@/lib/db/activityProfiles', () => ({
   deletePrepStep: (...a: unknown[]) => mockDeletePrepStep(...a),
 }));
 
-jest.mock('@/lib/db/client', () => ({ db: { select: jest.fn(() => ({ from: () => [] })) } }));
+const mockDb = { select: jest.fn(() => ({ from: () => [] })) };
+jest.mock('@/lib/db/client', () => ({
+  db: {
+    ...mockDb,
+    // The route wraps its write + reevaluateAllNeedsReview in one
+    // transaction; for these mocked-DB tests the callback just runs
+    // against the same fake db, same as a real `tx` would stand in for `db`.
+    transaction: (cb: (tx: unknown) => unknown) => cb(mockDb),
+  },
+}));
 jest.mock('@/lib/db/schema', () => ({ activityProfilePrepSteps: { activityProfileId: 'activityProfileId' } }));
 jest.mock('@/lib/utils/logError', () => ({ logError: jest.fn() }));
+
+const mockReevaluateAllNeedsReview = jest.fn();
+jest.mock('@/lib/services/activityMatching', () => ({
+  reevaluateAllNeedsReview: (...a: unknown[]) => mockReevaluateAllNeedsReview(...a),
+}));
 
 import { POST as createProfile, GET as listProfiles } from '../route';
 import { PATCH as patchProfile } from '../[id]/route';
@@ -69,16 +83,44 @@ describe('POST /api/activity-profiles — parent-only, no invented timing', () =
     mockRequireAuth.mockResolvedValue({ userId: 'p1', role: 'parent' });
     mockRequireRole.mockReturnValue(null);
     mockCreateActivityProfile.mockResolvedValue({ id: 'ap1', name: 'Hockey Practice' });
+    mockReevaluateAllNeedsReview.mockResolvedValue({ total: 0, resolved: 0, stillNeedsReview: 0 });
 
     const res = await createProfile(req('http://localhost/api/activity-profiles', { name: 'Hockey Practice' }));
     expect(res.status).toBe(201);
     expect(mockCreateActivityProfile).toHaveBeenCalledWith(
       expect.objectContaining({ name: 'Hockey Practice', createdBy: 'p1' }),
+      expect.anything(),
     );
     // arrivalBufferMinutes/travelMinutes simply weren't in the call args at all.
     const callArg = mockCreateActivityProfile.mock.calls[0][0];
     expect('arrivalBufferMinutes' in callArg).toBe(false);
     expect('travelMinutes' in callArg).toBe(false);
+  });
+
+  it('re-evaluates open Review Required items in the same transaction as the create', async () => {
+    mockRequireAuth.mockResolvedValue({ userId: 'p1', role: 'parent' });
+    mockRequireRole.mockReturnValue(null);
+    mockCreateActivityProfile.mockResolvedValue({ id: 'ap1', name: 'Hockey Mill' });
+    mockReevaluateAllNeedsReview.mockResolvedValue({ total: 1, resolved: 1, stillNeedsReview: 0 });
+
+    const res = await createProfile(req('http://localhost/api/activity-profiles', { name: 'Hockey Mill' }));
+    expect(res.status).toBe(201);
+    expect(mockReevaluateAllNeedsReview).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails the whole request (500) when re-evaluation throws, rather than reporting the profile as created', async () => {
+    mockRequireAuth.mockResolvedValue({ userId: 'p1', role: 'parent' });
+    mockRequireRole.mockReturnValue(null);
+    mockCreateActivityProfile.mockResolvedValue({ id: 'ap1', name: 'Hockey Mill' });
+    mockReevaluateAllNeedsReview.mockRejectedValue(new Error('boom'));
+
+    const res = await createProfile(req('http://localhost/api/activity-profiles', { name: 'Hockey Mill' }));
+
+    // A real Postgres transaction rolls the insert back too; this proves
+    // the route doesn't treat the create and the re-evaluation as two
+    // independent steps that could leave a profile saved with a
+    // partially-updated (or unrefreshed) Review Required queue.
+    expect(res.status).toBe(500);
   });
 
   it('rejects a request with no name (validation, before auth-gated work runs)', async () => {
@@ -113,7 +155,49 @@ describe('PATCH /api/activity-profiles/[id] — archive is the only "removal" pa
 
     const res = await patchProfile(req('http://localhost/api/activity-profiles/ap1', { archived: true }, 'PATCH'), params);
     expect(res.status).toBe(200);
-    expect(mockUpdateActivityProfile).toHaveBeenCalledWith('ap1', expect.objectContaining({ archived: true }));
+    expect(mockUpdateActivityProfile).toHaveBeenCalledWith('ap1', expect.objectContaining({ archived: true }), expect.anything());
+  });
+
+  it('does NOT re-evaluate Review Required items when archiving', async () => {
+    mockRequireAuth.mockResolvedValue({ userId: 'p1', role: 'parent' });
+    mockRequireRole.mockReturnValue(null);
+    mockUpdateActivityProfile.mockResolvedValue({ id: 'ap1', archived: true });
+
+    const res = await patchProfile(req('http://localhost/api/activity-profiles/ap1', { archived: true }, 'PATCH'), params);
+    expect(res.status).toBe(200);
+    expect(mockReevaluateAllNeedsReview).not.toHaveBeenCalled();
+  });
+
+  it('DOES re-evaluate Review Required items on restore (archived: false)', async () => {
+    mockRequireAuth.mockResolvedValue({ userId: 'p1', role: 'parent' });
+    mockRequireRole.mockReturnValue(null);
+    mockUpdateActivityProfile.mockResolvedValue({ id: 'ap1', archived: false });
+    mockReevaluateAllNeedsReview.mockResolvedValue({ total: 1, resolved: 1, stillNeedsReview: 0 });
+
+    const res = await patchProfile(req('http://localhost/api/activity-profiles/ap1', { archived: false }, 'PATCH'), params);
+    expect(res.status).toBe(200);
+    expect(mockReevaluateAllNeedsReview).toHaveBeenCalledTimes(1);
+  });
+
+  it('DOES re-evaluate Review Required items on an ordinary content update (no archived field)', async () => {
+    mockRequireAuth.mockResolvedValue({ userId: 'p1', role: 'parent' });
+    mockRequireRole.mockReturnValue(null);
+    mockUpdateActivityProfile.mockResolvedValue({ id: 'ap1', matchKeywords: ['Hockey Mill'] });
+    mockReevaluateAllNeedsReview.mockResolvedValue({ total: 1, resolved: 1, stillNeedsReview: 0 });
+
+    const res = await patchProfile(req('http://localhost/api/activity-profiles/ap1', { matchKeywords: ['Hockey Mill'] }, 'PATCH'), params);
+    expect(res.status).toBe(200);
+    expect(mockReevaluateAllNeedsReview).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT re-evaluate when the profile to update is not found', async () => {
+    mockRequireAuth.mockResolvedValue({ userId: 'p1', role: 'parent' });
+    mockRequireRole.mockReturnValue(null);
+    mockUpdateActivityProfile.mockResolvedValue(null);
+
+    const res = await patchProfile(req('http://localhost/api/activity-profiles/missing', { matchKeywords: ['x'] }, 'PATCH'), params);
+    expect(res.status).toBe(404);
+    expect(mockReevaluateAllNeedsReview).not.toHaveBeenCalled();
   });
 
   it('blocks a child from archiving/restoring', async () => {
@@ -155,6 +239,15 @@ describe('POST /api/activity-profiles/[id]/duplicate — independent copy', () =
     expect(mockCreatePrepStep).toHaveBeenCalledWith(
       expect.objectContaining({ activityProfileId: 'ap2', label: 'Get dressed' }),
     );
+    // Gear items get fresh ids too — activity_gear_completions keys per-
+    // occurrence checked state on this id, and the doc comment above this
+    // route promises "its own ids throughout" for the whole copy. Reusing
+    // the source's id ('g1') here would violate that for gear specifically.
+    const gearItemsArg = mockCreateActivityProfile.mock.calls[0]![0].gearItems;
+    expect(gearItemsArg).toEqual([expect.objectContaining({ label: 'Helmet', sortOrder: 0 })]);
+    expect(gearItemsArg[0].id).not.toBe('g1');
+    expect(typeof gearItemsArg[0].id).toBe('string');
+    expect(gearItemsArg[0].id.length).toBeGreaterThan(0);
   });
 
   it('404s when the source profile does not exist', async () => {

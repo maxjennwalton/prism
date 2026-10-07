@@ -2706,11 +2706,17 @@ CREATE TABLE IF NOT EXISTS public.activity_event_links (
   travel_minutes_override integer,
   location_override text,
   auto_matched boolean DEFAULT true NOT NULL,
+  -- Phase 3 (see drizzle/0028_activity_matching.sql): NULL = predates matching.
+  match_status varchar(20),
+  match_meta jsonb,
   created_at timestamp DEFAULT now() NOT NULL,
-  updated_at timestamp DEFAULT now() NOT NULL
+  updated_at timestamp DEFAULT now() NOT NULL,
+  CONSTRAINT activity_event_links_match_status_check
+    CHECK (match_status IS NULL OR match_status IN ('auto_confirmed', 'needs_review', 'confirmed', 'rejected'))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS activity_event_links_event_id_idx ON public.activity_event_links (event_id);
 CREATE INDEX IF NOT EXISTS activity_event_links_profile_idx ON public.activity_event_links (activity_profile_id);
+CREATE INDEX IF NOT EXISTS activity_event_links_match_status_idx ON public.activity_event_links (match_status);
 
 CREATE TABLE IF NOT EXISTS public.activity_gear_completions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,

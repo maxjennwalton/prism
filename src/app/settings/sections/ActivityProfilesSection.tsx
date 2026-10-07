@@ -11,6 +11,7 @@ import { useConfirmDialog } from '@/lib/hooks/useConfirmDialog';
 import { RemovedItemsManager } from '@/components/settings/RemovedItemsManager';
 import { useActivityProfiles, type ActivityProfileListItem } from '@/lib/hooks/useActivityProfiles';
 import { ActivityProfileEditorModal } from './activityProfiles/ActivityProfileEditorModal';
+import { ActivityMatchingCard } from './activityProfiles/ActivityMatchingCard';
 
 function summaryLine(p: ActivityProfileListItem): string {
   const parts: string[] = [];
@@ -32,7 +33,20 @@ export function ActivityProfilesSection() {
   const [restoringId, setRestoringId] = useState<string | null>(null);
   const { confirm, dialogProps: confirmDialogProps } = useConfirmDialog();
 
-  const refreshAll = async () => { await Promise.all([refreshActive(), refreshArchived()]); };
+  // Bumped on every mutation below (archive, restore, duplicate, create,
+  // edit) that can change what Activity Matching would do. Two siblings
+  // inside ActivityMatchingCard key off this: PreviewMatchesPanel discards
+  // its stale Test snapshot, and NeedsReviewPanel re-fetches the Review
+  // Required queue — both of these are independent hook instances with no
+  // other way to learn that a mutation happened elsewhere on the page. See
+  // each component's own doc comment.
+  const [reviewQueueVersion, setReviewQueueVersion] = useState(0);
+  const bumpReviewQueueVersion = () => setReviewQueueVersion((v) => v + 1);
+
+  const refreshAll = async () => {
+    await Promise.all([refreshActive(), refreshArchived()]);
+    bumpReviewQueueVersion();
+  };
 
   const handleArchive = async (p: ActivityProfileListItem) => {
     if (!await confirm(`Archive "${p.name}"?`, 'You can restore it later from the archived list below.')) return;
@@ -68,6 +82,8 @@ export function ActivityProfilesSection() {
 
   return (
     <div className="space-y-6">
+      <ActivityMatchingCard reviewQueueVersion={reviewQueueVersion} onIdentifiersSaved={bumpReviewQueueVersion} />
+
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold">Activity Profiles</h2>

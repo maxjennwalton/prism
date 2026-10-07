@@ -7,6 +7,7 @@ import {
   listActivityProfiles,
   createActivityProfile,
 } from '@/lib/db/activityProfiles';
+import { reevaluateAllNeedsReview } from '@/lib/services/activityMatching';
 import { createActivityProfileSchema, validateRequest } from '@/lib/validations';
 import { logError } from '@/lib/utils/logError';
 
@@ -53,6 +54,14 @@ export async function GET(request: NextRequest) {
  * POST /api/activity-profiles
  * Creates a new Activity Profile. Parent-only. No timing defaults are ever
  * injected — a field left out of the request body stays NULL.
+ *
+ * A new profile may be exactly what an existing Review Required event was
+ * waiting on (e.g. "U9MD - Hockey Mill" had no matching profile until one
+ * named "Hockey Mill" existed) — so the create and the automatic
+ * re-evaluation of every open needs_review link run as one transaction:
+ * either both the profile and any resulting match updates are saved, or
+ * neither is. reevaluateAllNeedsReview never touches a confirmed, rejected,
+ * or auto_confirmed link, and is a no-op entirely when matching is off.
  */
 export async function POST(request: NextRequest) {
   return withAuth(async (auth) => {
@@ -63,7 +72,12 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: validation.error.issues[0]?.message || 'Invalid request' }, { status: 400 });
       }
 
-      const profile = await createActivityProfile({ ...validation.data, createdBy: auth.userId });
+      const profile = await db.transaction(async (tx) => {
+        const created = await createActivityProfile({ ...validation.data, createdBy: auth.userId }, tx);
+        await reevaluateAllNeedsReview(tx);
+        return created;
+      });
+
       return NextResponse.json(profile, { status: 201 });
     } catch (error) {
       logError('Error creating activity profile:', error);

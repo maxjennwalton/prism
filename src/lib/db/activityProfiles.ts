@@ -8,15 +8,18 @@
  * like calendar_notes and dismissed_events.
  */
 import { and, asc, eq } from 'drizzle-orm';
-import { db } from './client';
+import { db, type DbExecutor } from './client';
 import {
   activityProfiles,
   activityProfilePrepSteps,
   activityEventLinks,
   activityGearCompletions,
   type ActivityGearItem,
+  type ActivityMatchMeta,
 } from './schema';
 import type { PrepStepAnchor } from '@/lib/constants/activityProfiles';
+
+type ActivityMatchStatus = 'auto_confirmed' | 'needs_review' | 'confirmed' | 'rejected';
 
 // ACTIVITY PROFILES
 
@@ -34,8 +37,8 @@ export interface CreateActivityProfileInput {
   createdBy?: string | null;
 }
 
-export async function listActivityProfiles(opts: { includeArchived?: boolean } = {}) {
-  const rows = await db.select().from(activityProfiles).orderBy(asc(activityProfiles.name));
+export async function listActivityProfiles(opts: { includeArchived?: boolean } = {}, executor: DbExecutor = db) {
+  const rows = await executor.select().from(activityProfiles).orderBy(asc(activityProfiles.name));
   return opts.includeArchived ? rows : rows.filter((p) => !p.archived);
 }
 
@@ -44,9 +47,15 @@ export async function getActivityProfile(id: string) {
   return row ?? null;
 }
 
-/** Inserts a new profile. Any buffer/travel field not supplied stays NULL — never defaulted to a guessed number. */
-export async function createActivityProfile(input: CreateActivityProfileInput) {
-  const [row] = await db
+/**
+ * Inserts a new profile. Any buffer/travel field not supplied stays NULL —
+ * never defaulted to a guessed number. Accepts an optional transaction
+ * executor so the API route can keep this write and the automatic
+ * needs_review re-evaluation it triggers atomic — see
+ * reevaluateAllNeedsReview.
+ */
+export async function createActivityProfile(input: CreateActivityProfileInput, executor: DbExecutor = db) {
+  const [row] = await executor
     .insert(activityProfiles)
     .values({
       name: input.name,
@@ -75,8 +84,9 @@ export interface UpdateActivityProfileInput {
   archived?: boolean;
 }
 
-export async function updateActivityProfile(id: string, input: UpdateActivityProfileInput) {
-  const [row] = await db
+/** Accepts an optional transaction executor for the same reason createActivityProfile does. */
+export async function updateActivityProfile(id: string, input: UpdateActivityProfileInput, executor: DbExecutor = db) {
+  const [row] = await executor
     .update(activityProfiles)
     .set({ ...input, updatedAt: new Date() })
     .where(eq(activityProfiles.id, id))
@@ -147,8 +157,8 @@ export async function deletePrepStep(id: string) {
 
 // EVENT LINKS
 
-export async function getActivityEventLink(eventId: string) {
-  const [row] = await db.select().from(activityEventLinks).where(eq(activityEventLinks.eventId, eventId));
+export async function getActivityEventLink(eventId: string, executor: DbExecutor = db) {
+  const [row] = await executor.select().from(activityEventLinks).where(eq(activityEventLinks.eventId, eventId));
   return row ?? null;
 }
 
@@ -161,19 +171,27 @@ export interface CreateActivityEventLinkInput {
   travelMinutesOverride?: number | null;
   locationOverride?: string | null;
   autoMatched?: boolean;
+  /** Phase 3 (Activity Event Matching). Omit for a manually created link. */
+  matchStatus?: ActivityMatchStatus | null;
+  matchMeta?: ActivityMatchMeta | null;
 }
 
 /**
  * Creates the link for an event if one doesn't exist yet; never overwrites an
  * existing row. This is the "don't reconsider a row a human already touched"
- * convention a future matcher relies on — mirrors how birthday detection
- * treats an existing/dismissed row as settled.
+ * convention the matcher relies on — mirrors how birthday detection treats an
+ * existing/dismissed row as settled.
+ *
+ * Accepts an optional transaction executor (the `tx` passed into a
+ * `db.transaction(async (tx) => ...)` callback) so the activation flow can
+ * run its backfill and its settings write as one atomic unit — a failed
+ * insert rolls back every link already written in the same call.
  */
-export async function createActivityEventLinkIfAbsent(input: CreateActivityEventLinkInput) {
-  const existing = await getActivityEventLink(input.eventId);
+export async function createActivityEventLinkIfAbsent(input: CreateActivityEventLinkInput, executor: DbExecutor = db) {
+  const existing = await getActivityEventLink(input.eventId, executor);
   if (existing) return existing;
 
-  const [row] = await db
+  const [row] = await executor
     .insert(activityEventLinks)
     .values({
       eventId: input.eventId,
@@ -184,6 +202,8 @@ export async function createActivityEventLinkIfAbsent(input: CreateActivityEvent
       travelMinutesOverride: input.travelMinutesOverride ?? null,
       locationOverride: input.locationOverride ?? null,
       autoMatched: input.autoMatched ?? true,
+      matchStatus: input.matchStatus ?? null,
+      matchMeta: input.matchMeta ?? null,
     })
     .returning();
   return row!;
@@ -196,11 +216,14 @@ export interface UpdateActivityEventLinkInput {
   arrivalBufferMinutesOverride?: number | null;
   travelMinutesOverride?: number | null;
   locationOverride?: string | null;
+  /** Phase 3 review actions (Confirm / Change Profile / Change Member / Not an Activity). */
+  matchStatus?: ActivityMatchStatus | null;
+  matchMeta?: ActivityMatchMeta | null;
 }
 
-/** A human edit. Always clears autoMatched so a future matcher leaves this row alone from now on. */
-export async function updateActivityEventLink(id: string, input: UpdateActivityEventLinkInput) {
-  const [row] = await db
+/** A human edit. Always clears autoMatched so the matcher leaves this row alone from now on. */
+export async function updateActivityEventLink(id: string, input: UpdateActivityEventLinkInput, executor: DbExecutor = db) {
+  const [row] = await executor
     .update(activityEventLinks)
     .set({ ...input, autoMatched: false, updatedAt: new Date() })
     .where(eq(activityEventLinks.id, id))

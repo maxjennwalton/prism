@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getDisplayAuth } from '@/lib/auth';
 import { withAuth } from '@/lib/api/withAuth';
+import { db } from '@/lib/db/client';
 import {
   getActivityProfile,
   listPrepSteps,
   updateActivityProfile,
 } from '@/lib/db/activityProfiles';
+import { reevaluateAllNeedsReview } from '@/lib/services/activityMatching';
 import { updateActivityProfileSchema, validateRequest } from '@/lib/validations';
 import { logError } from '@/lib/utils/logError';
 
@@ -42,6 +44,15 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
  * Updates basic fields, timing, gear template, and/or archived status.
  * Parent-only. Absent key = leave alone; explicit null clears an optional
  * field (e.g. arrivalBufferMinutes back to "not configured").
+ *
+ * An ordinary edit or a restore (`archived: false`) can be exactly what an
+ * existing Review Required event was waiting on (new keywords, a changed
+ * category, a profile coming back from the archive) — so either of those
+ * re-evaluates every open needs_review link, atomically with the write
+ * that triggered it. Archiving (`archived: true`) never does: narrowing
+ * future candidates can't newly resolve anything. reevaluateAllNeedsReview
+ * never touches a confirmed, rejected, or auto_confirmed link, and is a
+ * no-op entirely when matching is off.
  */
 export async function PATCH(request: NextRequest, { params }: RouteParams) {
   return withAuth(async () => {
@@ -53,7 +64,16 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
         return NextResponse.json({ error: validation.error.issues[0]?.message || 'Invalid request' }, { status: 400 });
       }
 
-      const updated = await updateActivityProfile(id, validation.data);
+      const isArchiving = validation.data.archived === true;
+
+      const updated = await db.transaction(async (tx) => {
+        const result = await updateActivityProfile(id, validation.data, tx);
+        if (result && !isArchiving) {
+          await reevaluateAllNeedsReview(tx);
+        }
+        return result;
+      });
+
       if (!updated) {
         return NextResponse.json({ error: 'Activity profile not found' }, { status: 404 });
       }
