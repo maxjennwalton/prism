@@ -15,7 +15,7 @@ export const PREVIEW_FILTER_LABEL: Record<PreviewFilter, string> = {
   all: 'All',
   auto_match: 'Auto Match',
   needs_review: 'Review Required',
-  ignore: 'Not an Activity',
+  ignore: 'Activity Profile N/A',
 };
 
 export function filterPreviewResults(

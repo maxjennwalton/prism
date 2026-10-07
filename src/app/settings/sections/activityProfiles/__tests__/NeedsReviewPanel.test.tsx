@@ -71,7 +71,7 @@ describe('NeedsReviewPanel — unclassified wording', () => {
     expect(screen.getByText('No matching Activity Profile')).not.toBeNull();
     expect(
       screen.getByText(
-        "Prism knows this is Beckham's activity, but there isn't a matching Activity Profile yet. Choose one below, create a new profile, or mark it as Not an Activity.",
+        "Prism knows this is Beckham's activity, but there isn't a matching Activity Profile yet. Choose one below, create a new profile, or mark the Activity Profile as N/A.",
       ),
     ).not.toBeNull();
   });
@@ -83,7 +83,7 @@ describe('NeedsReviewPanel — unclassified wording', () => {
     expect(screen.getByText('No matching Activity Profile')).not.toBeNull();
     expect(
       screen.getByText(
-        "Prism recognized this as a scheduled activity, but there isn't a matching Activity Profile yet and it isn't sure which family member it's for. Choose the correct profile and family member below, or mark it as Not an Activity.",
+        "Prism recognized this as a scheduled activity, but there isn't a matching Activity Profile yet and it isn't sure which family member it's for. Choose the correct profile and family member below, or mark the Activity Profile as N/A.",
       ),
     ).not.toBeNull();
     // Never invents a name it doesn't have.
@@ -98,7 +98,7 @@ describe('NeedsReviewPanel — category_unresolved wording', () => {
 
     expect(screen.getByText('Activity type not recognized')).not.toBeNull();
     expect(
-      screen.getByText("Prism found a possible activity but doesn't know what type it is yet. Choose the correct Activity Profile below, or mark it as Not an Activity."),
+      screen.getByText("Prism found a possible activity but doesn't know what type it is yet. Choose the correct Activity Profile below, or mark the Activity Profile as N/A."),
     ).not.toBeNull();
     expect(screen.queryByText('Category needed')).toBeNull();
   });
@@ -115,11 +115,11 @@ describe('NeedsReviewPanel — profile selector copy', () => {
 });
 
 describe('NeedsReviewPanel — existing confirm/reject behavior is unchanged', () => {
-  it('"Not an activity" still calls reject with the item id', async () => {
+  it('"Activity Profile N/A" still calls reject with the item id', async () => {
     mockItems = [baseItem({ reviewReason: 'unclassified', assignedMemberId: 'member-beckham' })];
     render(<NeedsReviewPanel reviewQueueVersion={0} />);
 
-    fireEvent.click(screen.getByRole('button', { name: /not an activity/i }));
+    fireEvent.click(screen.getByRole('button', { name: /activity profile n\/a/i }));
     await waitFor(() => expect(mockReject).toHaveBeenCalledWith('link-1'));
   });
 

@@ -26,7 +26,7 @@ const STATIC_REVIEW_REASON_LABEL: Record<Exclude<NonNullable<NeedsReviewItem['re
   ambiguous_category: { description: 'This event’s identifiers point to more than one category (e.g. Hockey and Soccer) — fix the category on one of them.' },
   category_unresolved: {
     title: 'Activity type not recognized',
-    description: "Prism found a possible activity but doesn't know what type it is yet. Choose the correct Activity Profile below, or mark it as Not an Activity.",
+    description: "Prism found a possible activity but doesn't know what type it is yet. Choose the correct Activity Profile below, or mark the Activity Profile as N/A.",
   },
 };
 
@@ -43,13 +43,13 @@ function unclassifiedCopy(memberName: string | null): ReviewReasonCopy {
   if (memberName) {
     return {
       title: 'No matching Activity Profile',
-      description: `Prism knows this is ${memberName}'s activity, but there isn't a matching Activity Profile yet. Choose one below, create a new profile, or mark it as Not an Activity.`,
+      description: `Prism knows this is ${memberName}'s activity, but there isn't a matching Activity Profile yet. Choose one below, create a new profile, or mark the Activity Profile as N/A.`,
     };
   }
   return {
     title: 'No matching Activity Profile',
     description:
-      "Prism recognized this as a scheduled activity, but there isn't a matching Activity Profile yet and it isn't sure which family member it's for. Choose the correct profile and family member below, or mark it as Not an Activity.",
+      "Prism recognized this as a scheduled activity, but there isn't a matching Activity Profile yet and it isn't sure which family member it's for. Choose the correct profile and family member below, or mark the Activity Profile as N/A.",
   };
 }
 
@@ -174,7 +174,7 @@ function NeedsReviewRow({
           </Button>
           <Button type="button" variant="outline" size="sm" onClick={handleReject} disabled={working !== null}>
             {working === 'reject' ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <X className="h-4 w-4 mr-1.5" />}
-            Not an activity
+            Activity Profile N/A
           </Button>
           <Button type="button" size="sm" onClick={handleConfirm} disabled={working !== null || !profileId}>
             {working === 'confirm' ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <Check className="h-4 w-4 mr-1.5" />}
@@ -227,7 +227,7 @@ export function NeedsReviewPanel({ reviewQueueVersion }: { reviewQueueVersion: n
       <div>
         <h3 className="text-sm font-semibold">Review Required ({items.length})</h3>
         <p className="text-sm text-muted-foreground">
-          These events couldn&apos;t be matched automatically. Confirm the right profile and member, or mark them as not an activity.
+          These events couldn&apos;t be matched automatically. Confirm the right profile and member, or mark the Activity Profile as N/A.
         </p>
       </div>
 

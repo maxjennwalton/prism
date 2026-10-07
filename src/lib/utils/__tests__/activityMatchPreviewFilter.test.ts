@@ -49,7 +49,7 @@ describe('filterPreviewResults — pure, client-side preview filtering', () => {
     expect(filtered.every((r) => r.result.outcome === 'needs_review')).toBe(true);
   });
 
-  it('"ignore" ("Not an Activity") returns only ignore rows', () => {
+  it('"ignore" ("Activity Profile N/A") returns only ignore rows', () => {
     const filtered = filterPreviewResults(rows, 'ignore');
     expect(filtered.map((r) => r.eventId)).toEqual(['3']);
     expect(filtered.every((r) => r.result.outcome === 'ignore')).toBe(true);

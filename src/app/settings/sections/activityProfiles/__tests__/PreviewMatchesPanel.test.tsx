@@ -111,7 +111,7 @@ describe('PreviewMatchesPanel — Activity Matching OFF', () => {
     expect(screen.getByText(/All \(1\)/)).not.toBeNull();
     expect(screen.getByText(/Auto Match \(0\)/)).not.toBeNull();
     expect(screen.getByText(/Review Required \(1\)/)).not.toBeNull();
-    expect(screen.getByText(/Not an Activity \(0\)/)).not.toBeNull();
+    expect(screen.getByText(/Activity Profile N\/A \(0\)/)).not.toBeNull();
   });
 
   it('removes the previously-shown result once reviewQueueVersion changes (e.g. the profile was just archived)', async () => {

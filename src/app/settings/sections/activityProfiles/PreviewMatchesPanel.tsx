@@ -32,7 +32,7 @@ function outcomeBadge(row: ActivityMatchEventSummary) {
   if (row.result.outcome === 'needs_review') {
     return <Badge variant="secondary">Review Required</Badge>;
   }
-  return <Badge variant="outline">Not an activity</Badge>;
+  return <Badge variant="outline">Activity Profile N/A</Badge>;
 }
 
 /** Fixed per-run totals from the API response — these never change as the filter selection changes. */
