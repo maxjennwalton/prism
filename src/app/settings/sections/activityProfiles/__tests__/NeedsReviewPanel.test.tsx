@@ -30,9 +30,10 @@ jest.mock('@/lib/hooks/useActivityMatchingStatus', () => ({
 
 const mockConfirm = jest.fn();
 const mockReject = jest.fn();
+const mockReevaluate = jest.fn();
 let mockItems: NeedsReviewItem[] = [];
 jest.mock('@/lib/hooks/useActivityMatchingNeedsReview', () => ({
-  useActivityMatchingNeedsReview: () => ({ items: mockItems, confirm: mockConfirm, reject: mockReject }),
+  useActivityMatchingNeedsReview: () => ({ items: mockItems, confirm: mockConfirm, reject: mockReject, reevaluate: mockReevaluate }),
 }));
 
 function baseItem(overrides: Partial<NeedsReviewItem>): NeedsReviewItem {
@@ -58,6 +59,7 @@ beforeEach(() => {
   mockUseActivityMatchingStatus.mockReturnValue({ status: { enabled: true, enabledAt: null }, loading: false });
   mockConfirm.mockResolvedValue(undefined);
   mockReject.mockResolvedValue(undefined);
+  mockReevaluate.mockResolvedValue(undefined);
 });
 
 describe('NeedsReviewPanel — unclassified wording', () => {
@@ -137,6 +139,24 @@ describe('NeedsReviewPanel — existing confirm/reject behavior is unchanged', (
 
     fireEvent.click(confirmButton);
     await waitFor(() => expect(mockConfirm).toHaveBeenCalledWith('link-1', 'profile-hockey-game', 'member-beckham'));
+  });
+});
+
+describe('NeedsReviewPanel — manual Re-evaluate Match', () => {
+  it('calls the reevaluate hook method with the item id when clicked', async () => {
+    mockItems = [baseItem({ id: 'link-42', eventTitle: 'U9MD - Hockey Mill', reviewReason: 'unclassified', assignedMemberId: 'member-beckham' })];
+    render(<NeedsReviewPanel />);
+
+    fireEvent.click(screen.getByRole('button', { name: /re-evaluate match/i }));
+    await waitFor(() => expect(mockReevaluate).toHaveBeenCalledWith('link-42'));
+  });
+
+  it('is available independently of Confirm — it is not disabled by a missing profile selection', () => {
+    mockItems = [baseItem({ reviewReason: 'unclassified', assignedMemberId: null, activityProfileId: null })];
+    render(<NeedsReviewPanel />);
+
+    const reevaluateButton = screen.getByRole('button', { name: /re-evaluate match/i });
+    expect(reevaluateButton.hasAttribute('disabled')).toBe(false);
   });
 });
 

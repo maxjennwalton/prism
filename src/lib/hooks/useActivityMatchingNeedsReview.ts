@@ -79,5 +79,19 @@ export function useActivityMatchingNeedsReview() {
     await refresh();
   }, [refresh]);
 
-  return { items, loading, refresh, confirm, reject };
+  /**
+   * Manual fallback for one record: re-runs the matcher against this
+   * occurrence with current profiles/identifiers. Automatic re-evaluation
+   * (after a profile or identifier save) is the normal path — this exists
+   * for the rest of the time, e.g. checking a single record again without
+   * having just changed anything. A confirmed/rejected/auto_confirmed link
+   * is never touched, even if somehow asked for by id.
+   */
+  const reevaluate = useCallback(async (id: string) => {
+    const res = await fetch(`/api/activity-matching/links/${id}/reevaluate`, { method: 'POST' });
+    await parseOrThrow(res, 'Failed to re-evaluate activity match');
+    await refresh();
+  }, [refresh]);
+
+  return { items, loading, refresh, confirm, reject, reevaluate };
 }

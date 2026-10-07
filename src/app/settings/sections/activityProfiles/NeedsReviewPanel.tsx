@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Check, X, Loader2 } from 'lucide-react';
+import { Check, X, Loader2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { toast } from '@/components/ui/use-toast';
@@ -73,16 +73,18 @@ function NeedsReviewRow({
   members,
   onConfirm,
   onReject,
+  onReevaluate,
 }: {
   item: NeedsReviewItem;
   profiles: { id: string; name: string }[];
   members: { id: string; name: string }[];
   onConfirm: (id: string, activityProfileId: string | null, assignedMemberId: string | null) => Promise<void>;
   onReject: (id: string) => Promise<void>;
+  onReevaluate: (id: string) => Promise<void>;
 }) {
   const [profileId, setProfileId] = useState(item.activityProfileId);
   const [memberId, setMemberId] = useState(item.assignedMemberId);
-  const [working, setWorking] = useState<'confirm' | 'reject' | null>(null);
+  const [working, setWorking] = useState<'confirm' | 'reject' | 'reevaluate' | null>(null);
 
   // The member the matcher actually resolved for this event (independent of
   // whatever the dropdown below is currently set to) — this is what
@@ -108,6 +110,17 @@ function NeedsReviewRow({
       await onReject(item.id);
     } catch (err) {
       toast({ title: err instanceof Error ? err.message : 'Failed to reject activity match', variant: 'destructive' });
+    } finally {
+      setWorking(null);
+    }
+  };
+
+  const handleReevaluate = async () => {
+    setWorking('reevaluate');
+    try {
+      await onReevaluate(item.id);
+    } catch (err) {
+      toast({ title: err instanceof Error ? err.message : 'Failed to re-evaluate activity match', variant: 'destructive' });
     } finally {
       setWorking(null);
     }
@@ -155,6 +168,10 @@ function NeedsReviewRow({
         </Select>
 
         <div className="flex items-center gap-1.5 ml-auto">
+          <Button type="button" variant="outline" size="sm" onClick={handleReevaluate} disabled={working !== null}>
+            {working === 'reevaluate' ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1.5" />}
+            Re-evaluate Match
+          </Button>
           <Button type="button" variant="outline" size="sm" onClick={handleReject} disabled={working !== null}>
             {working === 'reject' ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <X className="h-4 w-4 mr-1.5" />}
             Not an activity
@@ -179,7 +196,7 @@ export function NeedsReviewPanel() {
   const { status } = useActivityMatchingStatus();
   const { members } = useFamily();
   const { profiles } = useActivityProfiles();
-  const { items, confirm, reject } = useActivityMatchingNeedsReview();
+  const { items, confirm, reject, reevaluate } = useActivityMatchingNeedsReview();
 
   if (!status.enabled || items.length === 0) return null;
 
@@ -204,6 +221,7 @@ export function NeedsReviewPanel() {
             members={memberOptions}
             onConfirm={confirm}
             onReject={reject}
+            onReevaluate={reevaluate}
           />
         ))}
       </div>

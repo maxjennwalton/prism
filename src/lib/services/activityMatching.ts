@@ -250,9 +250,17 @@ export interface ReevaluateResult {
  * link — e.g. after editing a profile's keywords or adding an identifier,
  * to see whether this one event would resolve differently now. Unlike
  * every other path in this file, this intentionally DOES touch an existing
- * row: it's a direct human request, not automatic matching, so the
+ * row: it's a direct human request (the Needs Review panel's "Re-evaluate
+ * Match" button) or an automatic re-check after a configuration change
+ * (reevaluateAllNeedsReview, below) — not automatic *matching*, so the
  * "existing link row is never touched by automatic matching" invariant
- * doesn't apply here.
+ * doesn't apply to the matching itself here.
+ *
+ * It only ever applies to that row when it's still `needs_review`, though,
+ * manual or automatic: a parent's confirm/reject decision, and an
+ * already-settled auto_confirmed match, are never re-run or overwritten —
+ * same principle as `createActivityEventLinkIfAbsent` never touching an
+ * existing row, extended to this explicit-re-run path too.
  */
 export async function reevaluateMatch(linkId: string, executor: DbExecutor = db): Promise<ReevaluateResult | null> {
   const [row] = await executor
@@ -260,6 +268,7 @@ export async function reevaluateMatch(linkId: string, executor: DbExecutor = db)
       eventId: activityEventLinks.eventId,
       eventTitle: events.title,
       calendarGroupMemberId: calendarGroups.userId,
+      matchStatus: activityEventLinks.matchStatus,
     })
     .from(activityEventLinks)
     .innerJoin(events, eq(activityEventLinks.eventId, events.id))
@@ -268,6 +277,11 @@ export async function reevaluateMatch(linkId: string, executor: DbExecutor = db)
     .where(eq(activityEventLinks.id, linkId));
 
   if (!row) return null;
+
+  if (row.matchStatus !== 'needs_review') {
+    const [existing] = await executor.select().from(activityEventLinks).where(eq(activityEventLinks.id, linkId));
+    return { link: existing!, changed: false };
+  }
 
   const [profiles, teamIdentifiers] = await Promise.all([
     listActivityProfiles({}, executor),
@@ -307,4 +321,60 @@ export async function reevaluateMatch(linkId: string, executor: DbExecutor = db)
   );
 
   return { link: updated!, changed: true };
+}
+
+export interface ReevaluateAllSummary {
+  /** How many needs_review links were considered. */
+  total: number;
+  /** How many left the needs_review queue (resolved to auto_match). */
+  resolved: number;
+  /** How many were re-checked but still need a human decision. */
+  stillNeedsReview: number;
+}
+
+/**
+ * Re-runs every open needs_review link through the matcher — the automatic
+ * counterpart to reevaluateMatch's single-link form. Called after a
+ * configuration change that could resolve one: an Activity Profile is
+ * created, updated, or restored, or a Team & Calendar Identifier is
+ * created, updated, or deleted. Archiving a profile does NOT call this
+ * (narrowing future candidates can't newly resolve anything that wasn't
+ * already resolving).
+ *
+ * Only ever a no-op for settled rows: this queries `needs_review` links
+ * exclusively (the same filter listNeedsReviewLinks uses), and
+ * reevaluateMatch's own guard checks the same thing per row again — belt
+ * and suspenders, since confirmed/rejected/auto_confirmed links must never
+ * be touched by this.
+ *
+ * Also a no-op whenever Activity Matching is disabled, same as the cron
+ * tick — a household that hasn't turned matching on yet has no
+ * needs_review rows to re-check in the first place, and this keeps that
+ * invariant explicit rather than incidental.
+ *
+ * Processes links one at a time, not in parallel: when `executor` is a
+ * transaction (`tx` from `db.transaction`), concurrent queries on the same
+ * transaction aren't safe, and the household queue this runs over is small
+ * enough that this is never a meaningful cost.
+ */
+export async function reevaluateAllNeedsReview(executor: DbExecutor = db): Promise<ReevaluateAllSummary> {
+  if (!(await isMatchingEnabled(executor))) {
+    return { total: 0, resolved: 0, stillNeedsReview: 0 };
+  }
+
+  const rows = await executor
+    .select({ id: activityEventLinks.id })
+    .from(activityEventLinks)
+    .where(eq(activityEventLinks.matchStatus, 'needs_review'));
+
+  let resolved = 0;
+  let stillNeedsReview = 0;
+  for (const row of rows) {
+    const result = await reevaluateMatch(row.id, executor);
+    if (!result) continue;
+    if (result.link.matchStatus === 'needs_review') stillNeedsReview++;
+    else resolved++;
+  }
+
+  return { total: rows.length, resolved, stillNeedsReview };
 }

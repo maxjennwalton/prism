@@ -15,12 +15,25 @@ const mockWhere = jest.fn();
 const mockInsert = jest.fn();
 const mockUpdate = jest.fn();
 
+const dbMock = {
+  select: (...a: unknown[]) => mockSelect(...a),
+  insert: (...a: unknown[]) => mockInsert(...a),
+  update: (...a: unknown[]) => mockUpdate(...a),
+};
+
 jest.mock('@/lib/db/client', () => ({
   db: {
-    select: (...a: unknown[]) => mockSelect(...a),
-    insert: (...a: unknown[]) => mockInsert(...a),
-    update: (...a: unknown[]) => mockUpdate(...a),
+    ...dbMock,
+    // The activityTeamIdentifiers key wraps its upsert + the automatic
+    // Review Required re-evaluation it triggers in one transaction — the
+    // callback runs against the same mocked db, same as a real `tx` would.
+    transaction: (cb: (tx: unknown) => unknown) => cb(dbMock),
   },
+}));
+
+const mockReevaluateAllNeedsReview = jest.fn();
+jest.mock('@/lib/services/activityMatching', () => ({
+  reevaluateAllNeedsReview: (...a: unknown[]) => mockReevaluateAllNeedsReview(...a),
 }));
 
 jest.mock('@/lib/db/schema', () => ({
@@ -100,6 +113,7 @@ describe('PATCH /api/settings', () => {
     mockRequireAuth.mockResolvedValue(parentAuth);
     mockRequireRole.mockReturnValue(null);
     mockInvalidateEntity.mockResolvedValue(undefined);
+    mockReevaluateAllNeedsReview.mockResolvedValue({ total: 0, resolved: 0, stillNeedsReview: 0 });
 
     // Default: setting does not yet exist → insert path
     mockSelect.mockReturnValue({ from: mockFrom });
@@ -161,6 +175,61 @@ describe('PATCH /api/settings', () => {
 
     await PATCH(makePatchRequest({ key: 'location', value: 'London' }));
     expect(mockInvalidateEntity).toHaveBeenCalledWith('weather');
+  });
+
+  describe('activityTeamIdentifiers — automatic Review Required re-evaluation', () => {
+    beforeEach(() => {
+      mockUpdate.mockReturnValue({
+        set: jest.fn().mockReturnValue({ where: jest.fn().mockResolvedValue(undefined) }),
+      });
+    });
+
+    it('re-evaluates every open needs_review link after saving identifiers (covers create/update/delete — all save the same full array)', async () => {
+      mockWhere.mockResolvedValue([{ key: 'activityTeamIdentifiers', value: [] }]);
+
+      const res = await PATCH(makePatchRequest({
+        key: 'activityTeamIdentifiers',
+        value: [{ identifier: 'U9MD', memberId: 'member-beckham', category: 'Hockey' }],
+      }));
+
+      expect(res.status).toBe(200);
+      expect(mockReevaluateAllNeedsReview).toHaveBeenCalledTimes(1);
+    });
+
+    it('re-evaluates even when the save clears every identifier (a "delete")', async () => {
+      mockWhere.mockResolvedValue([{ key: 'activityTeamIdentifiers', value: [{ identifier: 'U9MD', memberId: 'm1', category: null }] }]);
+
+      const res = await PATCH(makePatchRequest({ key: 'activityTeamIdentifiers', value: [] }));
+
+      expect(res.status).toBe(200);
+      expect(mockReevaluateAllNeedsReview).toHaveBeenCalledTimes(1);
+    });
+
+    it('does NOT re-evaluate for unrelated setting keys', async () => {
+      mockWhere.mockResolvedValue([{ key: 'theme', value: 'dark' }]);
+
+      const res = await PATCH(makePatchRequest({ key: 'theme', value: 'light' }));
+
+      expect(res.status).toBe(200);
+      expect(mockReevaluateAllNeedsReview).not.toHaveBeenCalled();
+    });
+
+    it('fails the whole request (500) when re-evaluation throws, rather than reporting the identifiers as saved', async () => {
+      mockWhere.mockResolvedValue([{ key: 'activityTeamIdentifiers', value: [] }]);
+      mockReevaluateAllNeedsReview.mockRejectedValue(new Error('boom'));
+
+      const res = await PATCH(makePatchRequest({
+        key: 'activityTeamIdentifiers',
+        value: [{ identifier: 'U9MD', memberId: 'member-beckham', category: 'Hockey' }],
+      }));
+
+      // The route's generic catch turns this into a 500 — critically, NOT
+      // a 200 with the new identifiers echoed back. A real Postgres
+      // transaction rolls the update back too; this proves the code path
+      // doesn't treat the write and the re-evaluation as independent
+      // steps that could partially succeed.
+      expect(res.status).toBe(500);
+    });
   });
 
   describe('unauthenticated setup-bootstrap exception for pinLength', () => {

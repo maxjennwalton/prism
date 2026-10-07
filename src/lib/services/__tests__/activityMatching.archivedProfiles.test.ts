@@ -186,7 +186,7 @@ describe('reevaluateMatch — an archived profile never comes back on re-evaluat
             leftJoin: () => ({
               leftJoin: () => ({
                 where: () => [
-                  { eventId: 'e1', eventTitle: 'U9MD - Game vs Wasaga Beach Stars', calendarGroupMemberId: null },
+                  { eventId: 'e1', eventTitle: 'U9MD - Game vs Wasaga Beach Stars', calendarGroupMemberId: null, matchStatus: 'needs_review' },
                 ],
               }),
             }),

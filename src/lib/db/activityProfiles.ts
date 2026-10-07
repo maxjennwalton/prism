@@ -47,9 +47,15 @@ export async function getActivityProfile(id: string) {
   return row ?? null;
 }
 
-/** Inserts a new profile. Any buffer/travel field not supplied stays NULL — never defaulted to a guessed number. */
-export async function createActivityProfile(input: CreateActivityProfileInput) {
-  const [row] = await db
+/**
+ * Inserts a new profile. Any buffer/travel field not supplied stays NULL —
+ * never defaulted to a guessed number. Accepts an optional transaction
+ * executor so the API route can keep this write and the automatic
+ * needs_review re-evaluation it triggers atomic — see
+ * reevaluateAllNeedsReview.
+ */
+export async function createActivityProfile(input: CreateActivityProfileInput, executor: DbExecutor = db) {
+  const [row] = await executor
     .insert(activityProfiles)
     .values({
       name: input.name,
@@ -78,8 +84,9 @@ export interface UpdateActivityProfileInput {
   archived?: boolean;
 }
 
-export async function updateActivityProfile(id: string, input: UpdateActivityProfileInput) {
-  const [row] = await db
+/** Accepts an optional transaction executor for the same reason createActivityProfile does. */
+export async function updateActivityProfile(id: string, input: UpdateActivityProfileInput, executor: DbExecutor = db) {
+  const [row] = await executor
     .update(activityProfiles)
     .set({ ...input, updatedAt: new Date() })
     .where(eq(activityProfiles.id, id))
