@@ -61,6 +61,13 @@ async function loadTeamIdentifiers(executor: DbExecutor): Promise<MatchTeamIdent
  * Events in [from, to] with no activity_event_link yet, plus the member who
  * owns the calendar/group they came from (if that calendar is a per-member
  * one — type='user' — rather than a shared/custom calendar).
+ *
+ * Ordered soonest-first (ascending start time) — this is the one canonical
+ * place results get their chronological order. Preview, Activate's
+ * backfill, and the cron tick all go through this same query, so none of
+ * them need their own sort, and the Preview UI deliberately doesn't re-sort
+ * either — trusting this order is what keeps there from being two
+ * potentially-disagreeing sort implementations.
  */
 async function loadUnlinkedEventsInRange(executor: DbExecutor, from: Date, to: Date) {
   return executor
@@ -81,7 +88,8 @@ async function loadUnlinkedEventsInRange(executor: DbExecutor, from: Date, to: D
         gte(events.startTime, from),
         lte(events.startTime, to),
       ),
-    );
+    )
+    .orderBy(asc(events.startTime));
 }
 
 /** Settings key read by the client's useActivityMatchingStatus hook too — keep both in sync if this ever changes. */
