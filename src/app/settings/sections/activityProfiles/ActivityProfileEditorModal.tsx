@@ -251,18 +251,22 @@ export function ActivityProfileEditorModal({
                   />
                   <span className="text-sm">minutes before the event</span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm">Usually takes</span>
-                  <Input
-                    type="number" min={0} max={1440} className="w-20"
-                    value={draft.travelMinutes ?? ''}
-                    onChange={(e) => setDraft((d) => ({ ...d, travelMinutes: e.target.value === '' ? null : Math.max(0, Number(e.target.value)) }))}
-                  />
-                  <span className="text-sm">minutes to get there</span>
-                </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="ap-location">Default location (optional)</Label>
                   <Input id="ap-location" value={draft.defaultLocation} onChange={(e) => setDraft((d) => ({ ...d, defaultLocation: e.target.value }))} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="ap-travel">Fallback travel time (optional)</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      id="ap-travel"
+                      type="number" min={0} max={1440} className="w-20"
+                      value={draft.travelMinutes ?? ''}
+                      onChange={(e) => setDraft((d) => ({ ...d, travelMinutes: e.target.value === '' ? null : Math.max(0, Number(e.target.value)) }))}
+                    />
+                    <span className="text-sm text-muted-foreground">minutes</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">Used only when Prism can&apos;t calculate travel time from a location.</p>
                 </div>
               </CardContent>
             </Card>

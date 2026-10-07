@@ -44,6 +44,12 @@ export function TimelinePreview({
     [sampleTime, arrivalBufferMinutes, travelMinutes, prepSteps],
   );
 
+  // This preview has no real calendar event or routing to calculate from —
+  // whenever Leave Home shows a time here, it's only because of the
+  // fallback travel time entered above, not a calculated drive time. Make
+  // that explicit rather than letting it look like a real calculation.
+  const leaveHomeIsFromFallback = travelMinutes !== null && scheduled.some((r) => r.id === '__leave_home');
+
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
@@ -65,6 +71,12 @@ export function TimelinePreview({
         />
         <span className="text-xs text-muted-foreground">(preview only — never saved)</span>
       </div>
+
+      {leaveHomeIsFromFallback && (
+        <p className="text-xs text-muted-foreground">
+          This preview uses your fallback travel time above — it isn&apos;t calculated from a real destination.
+        </p>
+      )}
 
       <div className="rounded-md border border-border divide-y divide-border overflow-hidden">
         {scheduled.map((row) => {
