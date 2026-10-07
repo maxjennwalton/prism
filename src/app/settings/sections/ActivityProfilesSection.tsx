@@ -11,6 +11,7 @@ import { useConfirmDialog } from '@/lib/hooks/useConfirmDialog';
 import { RemovedItemsManager } from '@/components/settings/RemovedItemsManager';
 import { useActivityProfiles, type ActivityProfileListItem } from '@/lib/hooks/useActivityProfiles';
 import { ActivityProfileEditorModal } from './activityProfiles/ActivityProfileEditorModal';
+import { ActivityMatchingCard } from './activityProfiles/ActivityMatchingCard';
 
 function summaryLine(p: ActivityProfileListItem): string {
   const parts: string[] = [];
@@ -68,6 +69,8 @@ export function ActivityProfilesSection() {
 
   return (
     <div className="space-y-6">
+      <ActivityMatchingCard />
+
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-bold">Activity Profiles</h2>
