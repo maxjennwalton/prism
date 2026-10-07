@@ -155,6 +155,15 @@ describe('POST /api/activity-profiles/[id]/duplicate — independent copy', () =
     expect(mockCreatePrepStep).toHaveBeenCalledWith(
       expect.objectContaining({ activityProfileId: 'ap2', label: 'Get dressed' }),
     );
+    // Gear items get fresh ids too — activity_gear_completions keys per-
+    // occurrence checked state on this id, and the doc comment above this
+    // route promises "its own ids throughout" for the whole copy. Reusing
+    // the source's id ('g1') here would violate that for gear specifically.
+    const gearItemsArg = mockCreateActivityProfile.mock.calls[0]![0].gearItems;
+    expect(gearItemsArg).toEqual([expect.objectContaining({ label: 'Helmet', sortOrder: 0 })]);
+    expect(gearItemsArg[0].id).not.toBe('g1');
+    expect(typeof gearItemsArg[0].id).toBe('string');
+    expect(gearItemsArg[0].id.length).toBeGreaterThan(0);
   });
 
   it('404s when the source profile does not exist', async () => {

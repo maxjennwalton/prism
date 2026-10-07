@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { NextResponse } from 'next/server';
 import { withAuth } from '@/lib/api/withAuth';
 import {
@@ -29,6 +30,15 @@ export async function POST(request: Request, { params }: RouteParams) {
       }
       const sourceSteps = await listPrepSteps(id);
 
+      // Gear items carry their own id separate from the DB row (it's what
+      // activity_gear_completions keys per-occurrence checked state on), so
+      // copying it verbatim would give the duplicate's gear items the exact
+      // same ids as the source's — contradicting "the copy gets its own ids
+      // throughout" below. Regenerate them here, the same way a freshly
+      // added gear item gets one in the editor (GearChecklistEditor).
+      const sourceGearItems = source.gearItems as { id: string; label: string; sortOrder: number }[];
+      const copiedGearItems = sourceGearItems.map((g) => ({ ...g, id: randomUUID() }));
+
       const copy = await createActivityProfile({
         name: `${source.name} (copy)`,
         category: source.category,
@@ -37,7 +47,7 @@ export async function POST(request: Request, { params }: RouteParams) {
         arrivalBufferMinutes: source.arrivalBufferMinutes,
         travelMinutes: source.travelMinutes,
         defaultLocation: source.defaultLocation,
-        gearItems: source.gearItems as never,
+        gearItems: copiedGearItems,
         createdBy: auth.userId,
       });
 
