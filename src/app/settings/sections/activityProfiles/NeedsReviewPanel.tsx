@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Check, X, Loader2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
@@ -191,12 +191,31 @@ function NeedsReviewRow({
  * ambiguous (profile, member, or both) or that looked like an activity but
  * matched no profile. Only shown once matching is enabled and there's
  * something to review — see the Activity Matching card's layout.
+ *
+ * `reviewQueueVersion` is bumped by ActivityProfilesSection after a profile
+ * create/update/restore, and by TeamIdentifiersEditor after a successful
+ * identifier save — both already trigger the backend's own automatic
+ * re-evaluation (reevaluateAllNeedsReview), which may resolve or change
+ * items in this exact queue. This component has no other way to learn
+ * that happened (it's an independent hook instance, a sibling of
+ * TeamIdentifiersEditor and of ActivityProfilesSection's own profile list),
+ * so on a genuine version change it re-fetches the queue — a plain read of
+ * whatever the mutation's own re-evaluation already produced, never a
+ * second matcher run of its own.
  */
-export function NeedsReviewPanel() {
+export function NeedsReviewPanel({ reviewQueueVersion }: { reviewQueueVersion: number }) {
   const { status } = useActivityMatchingStatus();
   const { members } = useFamily();
   const { profiles } = useActivityProfiles();
-  const { items, confirm, reject, reevaluate } = useActivityMatchingNeedsReview();
+  const { items, confirm, reject, reevaluate, refresh } = useActivityMatchingNeedsReview();
+  const lastSeenVersionRef = useRef(reviewQueueVersion);
+
+  useEffect(() => {
+    if (lastSeenVersionRef.current !== reviewQueueVersion) {
+      lastSeenVersionRef.current = reviewQueueVersion;
+      refresh();
+    }
+  }, [reviewQueueVersion, refresh]);
 
   if (!status.enabled || items.length === 0) return null;
 

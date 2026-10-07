@@ -34,13 +34,18 @@ export function ActivityProfilesSection() {
   const { confirm, dialogProps: confirmDialogProps } = useConfirmDialog();
 
   // Bumped on every mutation below (archive, restore, duplicate, create,
-  // edit) so ActivityMatchingCard's Preview panel can tell its last
-  // snapshot is stale and discard it — see PreviewMatchesPanel's doc comment.
-  const [profilesVersion, setProfilesVersion] = useState(0);
+  // edit) that can change what Activity Matching would do. Two siblings
+  // inside ActivityMatchingCard key off this: PreviewMatchesPanel discards
+  // its stale Test snapshot, and NeedsReviewPanel re-fetches the Review
+  // Required queue — both of these are independent hook instances with no
+  // other way to learn that a mutation happened elsewhere on the page. See
+  // each component's own doc comment.
+  const [reviewQueueVersion, setReviewQueueVersion] = useState(0);
+  const bumpReviewQueueVersion = () => setReviewQueueVersion((v) => v + 1);
 
   const refreshAll = async () => {
     await Promise.all([refreshActive(), refreshArchived()]);
-    setProfilesVersion((v) => v + 1);
+    bumpReviewQueueVersion();
   };
 
   const handleArchive = async (p: ActivityProfileListItem) => {
@@ -77,7 +82,7 @@ export function ActivityProfilesSection() {
 
   return (
     <div className="space-y-6">
-      <ActivityMatchingCard profilesVersion={profilesVersion} />
+      <ActivityMatchingCard reviewQueueVersion={reviewQueueVersion} onIdentifiersSaved={bumpReviewQueueVersion} />
 
       <div className="flex items-center justify-between">
         <div>

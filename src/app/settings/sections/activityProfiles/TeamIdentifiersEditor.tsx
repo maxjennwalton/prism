@@ -40,8 +40,14 @@ function toDraftRows(identifiers: ActivityTeamIdentifier[]): DraftRow[] {
  * Category is optional: a household with only one sport never needs it.
  * Once configured, it becomes an authoritative constraint on matching for
  * that identifier's events — see activityMatcher.ts.
+ *
+ * `onSaved` fires only after a successful save (never on a validation
+ * failure or a rejected request) — ActivityProfilesSection uses it to bump
+ * the version counter NeedsReviewPanel and PreviewMatchesPanel key off of,
+ * since saving identifiers can change what the backend's own automatic
+ * re-evaluation (reevaluateAllNeedsReview) just resolved.
  */
-export function TeamIdentifiersEditor() {
+export function TeamIdentifiersEditor({ onSaved }: { onSaved?: () => void }) {
   const { members } = useFamily();
   const { identifiers, loading, saveIdentifiers } = useActivityTeamIdentifiers();
   const { profiles } = useActivityProfiles();
@@ -114,6 +120,7 @@ export function TeamIdentifiersEditor() {
       await saveIdentifiers(trimmed);
       setDirty(false);
       toast({ title: 'Team & calendar identifiers saved' });
+      onSaved?.();
     } catch (err) {
       toast({ title: err instanceof Error ? err.message : 'Failed to save identifiers', variant: 'destructive' });
     } finally {

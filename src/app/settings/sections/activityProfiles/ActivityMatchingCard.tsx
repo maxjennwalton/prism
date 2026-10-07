@@ -12,11 +12,22 @@ import { NeedsReviewPanel } from './NeedsReviewPanel';
  * Sits above the Activity Profiles list since it configures how calendar
  * events get linked to those profiles in the first place.
  *
- * `profilesVersion` is forwarded to PreviewMatchesPanel so it can discard a
- * preview snapshot that was computed before a profile was archived,
- * restored, duplicated, created, or edited — see its own doc comment.
+ * `reviewQueueVersion` is forwarded to PreviewMatchesPanel (to discard a
+ * Test snapshot computed before a profile was archived, restored,
+ * duplicated, created, or edited) and to NeedsReviewPanel (to re-fetch the
+ * Review Required queue after any of those same mutations, or after
+ * `onIdentifiersSaved` fires — see each component's own doc comment).
+ * Both of those mutations already trigger the backend's own automatic
+ * re-evaluation (see reevaluateAllNeedsReview); this is purely about the
+ * two sibling panels here learning that happened, not about causing it.
  */
-export function ActivityMatchingCard({ profilesVersion }: { profilesVersion: number }) {
+export function ActivityMatchingCard({
+  reviewQueueVersion,
+  onIdentifiersSaved,
+}: {
+  reviewQueueVersion: number;
+  onIdentifiersSaved: () => void;
+}) {
   return (
     <Card>
       <CardHeader>
@@ -26,10 +37,10 @@ export function ActivityMatchingCard({ profilesVersion }: { profilesVersion: num
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        <TeamIdentifiersEditor />
+        <TeamIdentifiersEditor onSaved={onIdentifiersSaved} />
         <MatchingStatusPanel />
-        <PreviewMatchesPanel profilesVersion={profilesVersion} />
-        <NeedsReviewPanel />
+        <PreviewMatchesPanel reviewQueueVersion={reviewQueueVersion} />
+        <NeedsReviewPanel reviewQueueVersion={reviewQueueVersion} />
       </CardContent>
     </Card>
   );

@@ -6,7 +6,7 @@
  * 1. The stale-snapshot regression from the archived-profile bug: a test
  *    run's result is a point-in-time snapshot held in component state
  *    (useActivityMatchingPreview), and nothing invalidated it when a
- *    profile was archived elsewhere on the same page. `profilesVersion`
+ *    profile was archived elsewhere on the same page. `reviewQueueVersion`
  *    fixes that.
  * 2. The UX cleanup this file is named for: "Test Activity Matching" is
  *    only ever meaningful while matching is OFF — its underlying query
@@ -93,7 +93,7 @@ describe('PreviewMatchesPanel — Activity Matching OFF', () => {
   });
 
   it('shows the "Test Activity Matching" section with its description and "Run Test" button', () => {
-    render(<PreviewMatchesPanel profilesVersion={0} />);
+    render(<PreviewMatchesPanel reviewQueueVersion={0} />);
     expect(screen.getByText('Test Activity Matching')).not.toBeNull();
     expect(
       screen.getByText('See how Activity Matching would handle your upcoming calendar events before you turn it on. Nothing will be saved.'),
@@ -102,7 +102,7 @@ describe('PreviewMatchesPanel — Activity Matching OFF', () => {
   });
 
   it('"Run Test" runs the test and displays results with the four outcome filters', async () => {
-    render(<PreviewMatchesPanel profilesVersion={0} />);
+    render(<PreviewMatchesPanel reviewQueueVersion={0} />);
 
     fireEvent.click(screen.getByRole('button', { name: /run test/i }));
     await flush();
@@ -114,8 +114,8 @@ describe('PreviewMatchesPanel — Activity Matching OFF', () => {
     expect(screen.getByText(/Not an Activity \(0\)/)).not.toBeNull();
   });
 
-  it('removes the previously-shown result once profilesVersion changes (e.g. the profile was just archived)', async () => {
-    const { rerender } = render(<PreviewMatchesPanel profilesVersion={0} />);
+  it('removes the previously-shown result once reviewQueueVersion changes (e.g. the profile was just archived)', async () => {
+    const { rerender } = render(<PreviewMatchesPanel reviewQueueVersion={0} />);
 
     fireEvent.click(screen.getByRole('button', { name: /run test/i }));
     await flush();
@@ -123,24 +123,24 @@ describe('PreviewMatchesPanel — Activity Matching OFF', () => {
     await waitFor(() => expect(screen.queryByText('U9MD - Game vs Wasaga Beach Stars')).not.toBeNull());
 
     // Simulate ActivityProfilesSection archiving a profile elsewhere on the
-    // page, which bumps profilesVersion — the snapshot above was computed
+    // page, which bumps reviewQueueVersion — the snapshot above was computed
     // before that happened.
-    rerender(<PreviewMatchesPanel profilesVersion={1} />);
+    rerender(<PreviewMatchesPanel reviewQueueVersion={1} />);
     await flush();
 
     expect(screen.queryByText('U9MD - Game vs Wasaga Beach Stars')).toBeNull();
   });
 
-  it('does not clear a freshly-run test — only one run after profilesVersion actually changed', async () => {
-    const { rerender } = render(<PreviewMatchesPanel profilesVersion={0} />);
+  it('does not clear a freshly-run test — only one run after reviewQueueVersion actually changed', async () => {
+    const { rerender } = render(<PreviewMatchesPanel reviewQueueVersion={0} />);
 
     fireEvent.click(screen.getByRole('button', { name: /run test/i }));
     await flush();
     await waitFor(() => expect(screen.queryByText('U9MD - Game vs Wasaga Beach Stars')).not.toBeNull());
 
-    // Re-rendering with the SAME profilesVersion (no mutation happened)
+    // Re-rendering with the SAME reviewQueueVersion (no mutation happened)
     // must not clear a result that's still current.
-    rerender(<PreviewMatchesPanel profilesVersion={0} />);
+    rerender(<PreviewMatchesPanel reviewQueueVersion={0} />);
     await flush();
 
     expect(screen.queryByText('U9MD - Game vs Wasaga Beach Stars')).not.toBeNull();
@@ -150,7 +150,7 @@ describe('PreviewMatchesPanel — Activity Matching OFF', () => {
 describe('PreviewMatchesPanel — Activity Matching ON', () => {
   it('renders nothing at all — no heading, no button, no counts, no results', () => {
     mockUseActivityMatchingStatus.mockReturnValue(statusOn());
-    const { container } = render(<PreviewMatchesPanel profilesVersion={0} />);
+    const { container } = render(<PreviewMatchesPanel reviewQueueVersion={0} />);
 
     expect(screen.queryByText('Test Activity Matching')).toBeNull();
     expect(screen.queryByRole('button', { name: /run test/i })).toBeNull();
