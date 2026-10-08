@@ -174,3 +174,39 @@ describe('createOpenRouteServiceProvider — rate limiting', () => {
     expect(outcome).toEqual({ status: 'unavailable', route: null, failureReason: 'rate_limited' });
   });
 });
+
+describe('createOpenRouteServiceProvider — privacy: the API key is never exposed outside the request itself', () => {
+  const SECRET_KEY = 'super-secret-ors-key-do-not-leak';
+
+  it('never appears anywhere in the returned RouteOutcome, success or failure', async () => {
+    mockFetchOnce({ routes: [{ summary: { distance: 1000, duration: 120 } }] });
+    const provider = createOpenRouteServiceProvider(SECRET_KEY);
+    const outcome = await provider.getDrivingRoute(ORIGIN, DESTINATION);
+    expect(JSON.stringify(outcome)).not.toContain(SECRET_KEY);
+
+    mockFetchOnce({}, false, 500);
+    mockFetchOnce({}, false, 500);
+    const failureOutcome = await provider.getDrivingRoute({ lat: 1, lon: 1 }, { lat: 2, lon: 2 });
+    expect(JSON.stringify(failureOutcome)).not.toContain(SECRET_KEY);
+  });
+
+  it('never appears in what gets written to the Redis cache', async () => {
+    mockFetchOnce({ routes: [{ summary: { distance: 1000, duration: 120 } }] });
+    const provider = createOpenRouteServiceProvider(SECRET_KEY);
+    await provider.getDrivingRoute(ORIGIN, DESTINATION);
+
+    const cachedValues = fakeRedisClient.setEx.mock.calls.map(([, , value]) => value);
+    expect(cachedValues.some((v) => String(v).includes(SECRET_KEY))).toBe(false);
+  });
+
+  it('is only ever sent in the Authorization header, never as a query parameter or in the request body', async () => {
+    mockFetchOnce({ routes: [{ summary: { distance: 1, duration: 1 } }] });
+    const provider = createOpenRouteServiceProvider(SECRET_KEY);
+    await provider.getDrivingRoute(ORIGIN, DESTINATION);
+
+    const [url, init] = (global.fetch as jest.Mock).mock.calls[0];
+    expect(String(url)).not.toContain(SECRET_KEY);
+    expect(init.body).not.toContain(SECRET_KEY);
+    expect(init.headers.Authorization).toBe(SECRET_KEY);
+  });
+});
