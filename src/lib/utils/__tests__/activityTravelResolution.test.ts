@@ -2,6 +2,7 @@ import {
   resolveEffectiveTravel,
   resolveEffectiveDeparture,
   hashTravelLocation,
+  hashTravelText,
   isAmbiguousGeocodeMatch,
   travelSourceLabel,
   type ActivityTravelCalculation,
@@ -198,6 +199,26 @@ describe('hashTravelLocation — stable fingerprint of a resolved location', () 
     const a = hashTravelLocation({ address: '123 Main St', lat: 40.712800000001, lon: -74.006 });
     const b = hashTravelLocation({ address: '123 Main St', lat: 40.7128, lon: -74.006 });
     expect(a).toBe(b);
+  });
+});
+
+describe('hashTravelText — fingerprint of raw text alone (no coordinates)', () => {
+  it('produces the same hash for the same text', () => {
+    expect(hashTravelText('123 Main St')).toBe(hashTravelText('123 Main St'));
+  });
+
+  it('is case/whitespace insensitive', () => {
+    expect(hashTravelText('123 Main St')).toBe(hashTravelText('  123 MAIN ST  '));
+  });
+
+  it('changes when the text changes', () => {
+    expect(hashTravelText('123 Main St')).not.toBe(hashTravelText('456 Main St'));
+  });
+
+  it('differs from hashTravelLocation for the same address text (distinct hash spaces)', () => {
+    const textHash = hashTravelText('123 Main St');
+    const locationHash = hashTravelLocation({ address: '123 Main St', lat: 0, lon: 0 });
+    expect(textHash).not.toBe(locationHash);
   });
 });
 

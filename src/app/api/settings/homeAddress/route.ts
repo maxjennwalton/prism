@@ -21,22 +21,16 @@ import { settings } from '@/lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { logActivity } from '@/lib/services/auditLog';
 import { logError } from '@/lib/utils/logError';
+import { getHomeAddress, HOME_ADDRESS_SETTING_KEY, type HomeAddress } from '@/lib/services/homeAddress';
 
-const KEY = 'homeAddress';
-
-export interface HomeAddress {
-  address: string;
-  lat: number;
-  lon: number;
-}
+const KEY = HOME_ADDRESS_SETTING_KEY;
 
 export async function GET() {
   const auth = await requireAuth();
   if (auth instanceof NextResponse) return auth;
 
   try {
-    const [row] = await db.select().from(settings).where(eq(settings.key, KEY));
-    return NextResponse.json({ homeAddress: (row?.value as HomeAddress) ?? null });
+    return NextResponse.json({ homeAddress: await getHomeAddress() });
   } catch (error) {
     logError('Error fetching home address:', error);
     return NextResponse.json({ homeAddress: null });

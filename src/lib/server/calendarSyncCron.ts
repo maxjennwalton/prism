@@ -16,6 +16,7 @@ import { syncAllGoogleCalendars, syncAllIcalCalendars, syncAllCalDAVCalendars } 
 import { syncCardDAVBirthdays } from '@/lib/services/carddav-birthday-sync';
 import { detectBirthdaysFromEvents } from '@/lib/services/birthday-detect';
 import { runActivityMatchingTick } from '@/lib/services/activityMatching';
+import { recomputeActivityTravelForUpcoming } from '@/lib/services/activityTravel';
 import { invalidateEntity } from '@/lib/cache/cacheKeys';
 
 const INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
@@ -42,6 +43,14 @@ async function runOnce() {
     // here — not even the "no activity" rows this sometimes creates.
     const matched = await runActivityMatchingTick();
 
+    // Phase 4B: recompute driving-time estimates for settled, upcoming
+    // activities. This is the only place routing requests originate from —
+    // never the dashboard's countdown tick — so provider usage stays on a
+    // bounded, server-side schedule. computeActivityTravel's own staleness
+    // check means most ticks do little real work (a fresh, unchanged result
+    // is reused rather than re-requested).
+    const travel = await recomputeActivityTravelForUpcoming();
+
     const total = google.total + ical.total + caldav.total + carddav.synced;
     const errors = [
       ...google.errors, ...ical.errors, ...caldav.errors,
@@ -59,6 +68,10 @@ async function runOnce() {
     const matchedSuffix = matched
       ? ` (activity matching: ${matched.autoMatched} auto-matched, ${matched.needsReview} need review)`
       : '';
+    const travelSuffix =
+      travel.scanned > 0
+        ? ` (travel: ${travel.calculated} calculated, ${travel.reused} reused, ${travel.failed} unavailable)`
+        : '';
 
     if (errors.length > 0) {
       console.warn(
@@ -66,7 +79,7 @@ async function runOnce() {
         errors.slice(0, 3),
       );
     } else {
-      console.log(`[calendar-cron] synced ${total} events/tasks${matchedSuffix}`);
+      console.log(`[calendar-cron] synced ${total} events/tasks${matchedSuffix}${travelSuffix}`);
     }
   } catch (err) {
     // Never let a transient sync failure crash the cron loop.

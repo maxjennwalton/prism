@@ -141,6 +141,16 @@ export function hashTravelLocation(identity: TravelLocationIdentity): string {
   return createHash('sha256').update(canonical).digest('hex');
 }
 
+/**
+ * Fingerprints raw input text alone, with no coordinates — used when a
+ * geocode attempt fails or comes back ambiguous, so there is still
+ * something to detect "the configured address text itself changed since"
+ * even though no coordinate was ever resolved for it.
+ */
+export function hashTravelText(text: string): string {
+  return createHash('sha256').update(text.trim().toLowerCase()).digest('hex');
+}
+
 export interface GeocodeCandidate {
   importance: number;
 }
