@@ -161,5 +161,10 @@ export function useActivityWorkflow() {
 
   const refresh = useCallback(() => fetchItems(), [fetchItems]);
 
-  return { items, loading, error, refresh };
+  // Exposed so callers computing their own display text (e.g. a countdown
+  // label) use this same tick rather than calling Date.now() fresh during
+  // render — React's purity rule flags that as an impure render, and it
+  // would drift from the instant `items[].status` was actually computed
+  // against on this exact render.
+  return { items, loading, error, refresh, now };
 }

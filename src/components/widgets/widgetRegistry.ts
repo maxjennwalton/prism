@@ -15,6 +15,7 @@ const PointsWidget = lazy(() => import('./PointsWidget').then(m => ({ default: m
 const WishesWidget = lazy(() => import('./WishesWidget').then(m => ({ default: m.WishesWidget })));
 const BusTrackingWidget = lazy(() => import('./BusTrackingWidget').then(m => ({ default: m.BusTrackingWidget })));
 const TravelWidget = lazy(() => import('./TravelWidget').then(m => ({ default: m.TravelWidget })));
+const ActivityWorkflowWidget = lazy(() => import('./ActivityWorkflowWidget').then(m => ({ default: m.ActivityWorkflowWidget })));
 
 export interface WidgetProps {
   className?: string;
@@ -164,6 +165,15 @@ export const WIDGET_REGISTRY: Record<string, WidgetRegistryEntry> = {
     minW: 8,
     minH: 8,
     defaultW: 12,
+    defaultH: 12,
+  },
+  activityWorkflow: {
+    component: ActivityWorkflowWidget,
+    label: 'Activity Workflow',
+    icon: 'CalendarClock',
+    minW: 10,
+    minH: 8,
+    defaultW: 14,
     defaultH: 12,
   },
 };

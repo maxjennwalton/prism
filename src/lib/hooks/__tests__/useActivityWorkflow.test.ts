@@ -47,6 +47,14 @@ describe('useActivityWorkflow — fetch + parse', () => {
     expect(result.current.items[0]!.arrivalTime).toEqual(new Date('2026-10-08T17:30:00.000Z'));
   });
 
+  it('exposes `now` so callers never need to call Date.now() themselves during render', async () => {
+    mockFetchOnce([rawItem()]);
+    const { result } = renderHook(() => useActivityWorkflow());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.now).toBeInstanceOf(Date);
+  });
+
   it('surfaces an error and empties items when the fetch fails, without throwing', async () => {
     (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: false, json: async () => ({ error: 'boom' }) });
     const { result } = renderHook(() => useActivityWorkflow());
