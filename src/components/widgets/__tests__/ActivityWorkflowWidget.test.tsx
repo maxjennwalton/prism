@@ -113,16 +113,58 @@ describe('ActivityWorkflowWidget — primary + compact list', () => {
     });
     render(<ActivityWorkflowWidget />);
 
-    expect(screen.getByText('U9MD - Hockey Practice vs. the Lightning Travel Team B')).not.toBeNull();
+    expect(screen.getByText('Hockey Practice — Beckham')).not.toBeNull();
     expect(screen.getByText(/Soccer/)).not.toBeNull();
     expect(screen.queryByTestId('widget-empty')).toBeNull();
   });
 
-  it('shows the family member and profile name on the primary card', () => {
+  it('shows the family member color indicator alongside the primary card heading', () => {
     mockUseActivityWorkflow.mockReturnValue({ items: [activity()], loading: false, error: null });
     render(<ActivityWorkflowWidget />);
-    expect(screen.getByText('Beckham')).not.toBeNull();
-    expect(screen.getByText(/· Hockey Practice/)).not.toBeNull();
+    expect(screen.getByText('Hockey Practice — Beckham')).not.toBeNull();
+  });
+});
+
+describe('ActivityWorkflowWidget — Phase 4A-final: main heading is "{Activity Profile} — {member}"', () => {
+  it('renders exactly "Soccer Game — Beckham" for a profile named Soccer Game and member Beckham', () => {
+    mockUseActivityWorkflow.mockReturnValue({
+      items: [activity({ profileName: 'Soccer Game', memberName: 'Beckham' })],
+      loading: false,
+      error: null,
+    });
+    render(<ActivityWorkflowWidget />);
+    expect(screen.getByText('Soccer Game — Beckham')).not.toBeNull();
+  });
+
+  it('retains the original raw calendar title as an accessible tooltip (native title attribute), never dropped', () => {
+    mockUseActivityWorkflow.mockReturnValue({
+      items: [activity({ eventTitle: 'U9MD - Soccer Game vs. Riverside FC', profileName: 'Soccer Game', memberName: 'Beckham' })],
+      loading: false,
+      error: null,
+    });
+    render(<ActivityWorkflowWidget />);
+    expect(screen.getByTitle('U9MD - Soccer Game vs. Riverside FC')).not.toBeNull();
+  });
+
+  it('falls back to the profile name alone when no member is assigned', () => {
+    mockUseActivityWorkflow.mockReturnValue({
+      items: [activity({ profileName: 'Soccer Game', memberName: null, memberColor: null })],
+      loading: false,
+      error: null,
+    });
+    render(<ActivityWorkflowWidget />);
+    expect(screen.getByText('Soccer Game')).not.toBeNull();
+    expect(screen.queryByText(/—/)).toBeNull();
+  });
+
+  it('falls back to the raw event title + member when no profile is matched (edge case, not expected in normal use)', () => {
+    mockUseActivityWorkflow.mockReturnValue({
+      items: [activity({ eventTitle: 'Unmatched Event', profileName: null, memberName: 'Beckham' })],
+      loading: false,
+      error: null,
+    });
+    render(<ActivityWorkflowWidget />);
+    expect(screen.getByText('Unmatched Event — Beckham')).not.toBeNull();
   });
 });
 

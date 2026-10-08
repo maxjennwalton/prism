@@ -246,6 +246,19 @@ function PrepStepTimeline({ activity, fmtTime, now }: { activity: ActivityWorkfl
   );
 }
 
+/**
+ * Phase 4A-final: "{Activity Profile name} — {family member name}" is the
+ * main heading, e.g. "Soccer Game — Beckham" — never the raw calendar
+ * title. Falls back gracefully when either half is missing (settled links
+ * can legitimately carry no member, or — rarely, via direct API use — no
+ * profile); the original title is always still reachable via the heading's
+ * own tooltip, never dropped.
+ */
+function primaryHeading(activity: ActivityWorkflowActivity): string {
+  const base = activity.profileName ?? activity.eventTitle;
+  return activity.memberName ? `${base} — ${activity.memberName}` : base;
+}
+
 function PrimaryActivityCard({
   activity,
   fmtTime,
@@ -266,17 +279,11 @@ function PrimaryActivityCard({
       )}
     >
       <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0">
-          <div className="font-semibold truncate" title={activity.eventTitle}>{activity.eventTitle}</div>
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            {activity.memberName && (
-              <span className="inline-flex items-center gap-1">
-                <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: activity.memberColor ?? '#9CA3AF' }} aria-hidden="true" />
-                {activity.memberName}
-              </span>
-            )}
-            {activity.profileName && <span>· {activity.profileName}</span>}
-          </div>
+        <div className="min-w-0 flex items-center gap-1.5">
+          {activity.memberName && (
+            <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: activity.memberColor ?? '#9CA3AF' }} aria-hidden="true" />
+          )}
+          <div className="font-semibold truncate" title={activity.eventTitle}>{primaryHeading(activity)}</div>
         </div>
         <Badge variant={badge.variant}>{badge.label}</Badge>
       </div>
@@ -292,11 +299,6 @@ function PrimaryActivityCard({
 
 function CompactActivityRow({ activity, fmtTime, narrow }: { activity: ActivityWorkflowActivity; fmtTime: (d: Date) => string; narrow: boolean }) {
   const badge = PHASE_BADGE[activity.status.phase];
-  // Prefer the matched Activity Profile as the headline label — a raw
-  // calendar title ("U9MD - Hockey Practice vs. the Lightning Travel Team")
-  // is often far longer than the profile it matched. The original title is
-  // always still available as a native tooltip rather than dropped.
-  const primaryLabel = activity.profileName ?? activity.eventTitle;
   return (
     <div
       className="flex items-center gap-2 rounded-md border border-border bg-card/40 px-2 py-1.5 text-xs"
@@ -306,10 +308,7 @@ function CompactActivityRow({ activity, fmtTime, narrow }: { activity: ActivityW
         <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: activity.memberColor ?? '#9CA3AF' }} aria-hidden="true" />
       )}
       <div className="min-w-0 flex-1">
-        <div className="font-medium truncate">
-          {primaryLabel}
-          {activity.memberName ? ` · ${activity.memberName}` : ''}
-        </div>
+        <div className="font-medium truncate">{primaryHeading(activity)}</div>
         <div className="text-muted-foreground truncate">
           {fmtTime(activity.eventStart)}
           {!narrow && activity.location ? ` · ${activity.location}` : ''}

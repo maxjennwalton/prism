@@ -272,3 +272,45 @@ describe('listTodayActivityWorkflow — phases', () => {
     expect(item!.status.phase).toBe('completed');
   });
 });
+
+describe('listTodayActivityWorkflow — Phase 4A-final acceptance: leave-home never fabricated from unknown travel', () => {
+  it('never computes a Leave Home (or a leave-home-anchored prep step) when travel duration is unknown — Event Start and Arrival stay valid', async () => {
+    mockTimezoneSelect('UTC');
+    mockMainQuery([baseRow({ profileArrivalBufferMinutes: 30, profileTravelMinutes: null })]); // arrival known, travel unknown
+    mockPrepStepsQuery([
+      { id: 'step-1', activityProfileId: 'profile-hockey', label: 'Get dressed', anchor: 'leave_home', offsetMinutes: 10, isCheckable: true },
+    ]);
+    const [item] = await listTodayActivityWorkflow(new Date('2026-10-08T16:00:00.000Z'));
+
+    expect(item!.leaveHomeTime).toBeNull();
+    expect(item!.arrivalTime?.toISOString()).toBe('2026-10-08T17:30:00.000Z'); // event start - 30min buffer, unaffected by unknown travel
+    expect(item!.eventStart.toISOString()).toBe('2026-10-08T18:00:00.000Z');
+    // The prep step anchored to Leave Home has no fabricated time either.
+    const prepStep = item!.prepSteps.find((s) => s.id === 'step-1');
+    expect(prepStep!.time).toBeNull();
+    expect(prepStep!.unscheduledReason).toMatch(/leave home/i);
+  });
+
+  it('preserves an explicitly configured zero travel time as a real, calculated Leave Home — distinct from unconfigured', async () => {
+    mockTimezoneSelect('UTC');
+    mockMainQuery([baseRow({ profileArrivalBufferMinutes: 30, profileTravelMinutes: 0 })]); // explicit 0, never "unset"
+    mockPrepStepsQuery([]);
+    const [item] = await listTodayActivityWorkflow(new Date('2026-10-08T16:00:00.000Z'));
+
+    // Leave Home coincides exactly with Arrival (0 minutes of travel) — a real
+    // calculated time, not "Not calculated".
+    expect(item!.leaveHomeTime?.toISOString()).toBe('2026-10-08T17:30:00.000Z');
+    expect(item!.arrivalTime?.toISOString()).toBe('2026-10-08T17:30:00.000Z');
+  });
+
+  it('computes Event Start, Arrival, and Leave Home correctly when every input is configured', async () => {
+    mockTimezoneSelect('UTC');
+    mockMainQuery([baseRow({ profileArrivalBufferMinutes: 30, profileTravelMinutes: 20 })]);
+    mockPrepStepsQuery([]);
+    const [item] = await listTodayActivityWorkflow(new Date('2026-10-08T16:00:00.000Z'));
+
+    expect(item!.eventStart.toISOString()).toBe('2026-10-08T18:00:00.000Z');
+    expect(item!.arrivalTime?.toISOString()).toBe('2026-10-08T17:30:00.000Z');
+    expect(item!.leaveHomeTime?.toISOString()).toBe('2026-10-08T17:10:00.000Z');
+  });
+});
