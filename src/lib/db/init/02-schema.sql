@@ -2705,10 +2705,14 @@ CREATE TABLE IF NOT EXISTS public.activity_event_links (
   arrival_buffer_minutes_override integer,
   travel_minutes_override integer,
   location_override text,
+  -- Phase 4B (see drizzle/0029_activity_travel.sql): NULL = depart from Home.
+  departure_location_override text,
   auto_matched boolean DEFAULT true NOT NULL,
   -- Phase 3 (see drizzle/0028_activity_matching.sql): NULL = predates matching.
   match_status varchar(20),
   match_meta jsonb,
+  -- Phase 4B: NULL = no calculated route yet.
+  travel_meta jsonb,
   created_at timestamp DEFAULT now() NOT NULL,
   updated_at timestamp DEFAULT now() NOT NULL,
   CONSTRAINT activity_event_links_match_status_check

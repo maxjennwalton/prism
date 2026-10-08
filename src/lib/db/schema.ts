@@ -1949,6 +1949,33 @@ export interface ActivityMatchMeta {
   categoryCandidates: string[];
 }
 
+/**
+ * Shape of activity_event_links.travel_meta (Phase 4B). Only ever read back
+ * for display and for staleness/invalidation checks — never queried on, so
+ * it stays jsonb rather than normalized columns, mirroring match_meta's own
+ * "status + detail blob" shape.
+ *
+ * `departureInputHash`/`destinationInputHash` are opaque fingerprints of the
+ * resolved coordinates/address text a result was calculated FROM — not the
+ * addresses themselves — so a later change to Home, a departure override,
+ * or the resolved destination can be detected (hashes no longer match) and
+ * the stored result treated as stale, WITHOUT needing a separate "is this
+ * stale" boolean to keep in sync by hand.
+ */
+export interface ActivityTravelMeta {
+  status: 'ok' | 'unavailable';
+  /** Rounded whole minutes. Present only when status is 'ok'. */
+  minutes: number | null;
+  provider: string;
+  calculatedAt: string;
+  distanceMeters: number | null;
+  durationSeconds: number | null;
+  departureInputHash: string;
+  destinationInputHash: string;
+  /** Present only when status is 'unavailable' — e.g. "geocode_failed", "ambiguous_destination", "provider_timeout". */
+  failureReason: string | null;
+}
+
 export const activityProfiles = pgTable('activity_profiles', {
   id: uuid('id').defaultRandom().primaryKey(),
 
@@ -2061,6 +2088,11 @@ export const activityEventLinks = pgTable('activity_event_links', {
   travelMinutesOverride: integer('travel_minutes_override'),
   locationOverride: text('location_override'),
 
+  // Phase 4B. NULL = depart from the household's default Home address.
+  // Saving this never touches the Home setting itself (it's a per-event
+  // override, not an edit to the default).
+  departureLocationOverride: text('departure_location_override'),
+
   // true until a human edits anything on this row; a future matcher should
   // then leave it alone on later syncs.
   autoMatched: boolean('auto_matched').default(true).notNull(),
@@ -2069,6 +2101,10 @@ export const activityEventLinks = pgTable('activity_event_links', {
   // (created manually) and carries no matching metadata.
   matchStatus: varchar('match_status', { length: 20 }).$type<'auto_confirmed' | 'needs_review' | 'confirmed' | 'rejected' | null>(),
   matchMeta: jsonb('match_meta').$type<ActivityMatchMeta | null>(),
+
+  // Phase 4B. NULL = no calculated route yet (travel time is unknown,
+  // unless travelMinutesOverride above supplies a manual value instead).
+  travelMeta: jsonb('travel_meta').$type<ActivityTravelMeta | null>(),
 
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
