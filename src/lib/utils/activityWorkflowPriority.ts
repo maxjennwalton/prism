@@ -18,14 +18,30 @@ export type ActivityPhase = 'overdue' | 'upcoming' | 'in_progress' | 'completed'
 
 export interface ActivityWorkflowStatus {
   phase: ActivityPhase;
-  /** The soonest not-yet-passed milestone — set only when phase is 'upcoming'. */
+  /**
+   * The soonest not-yet-passed milestone (or Event Starts itself, once
+   * nothing else remains ahead) — present whenever anything is still
+   * reachable, INCLUDING while phase is 'overdue': missing one deadline
+   * (e.g. Leave Home) never hides a later one that's still reachable (e.g.
+   * Arrive). Null only for 'in_progress'/'completed', where nothing
+   * pre-event is actionable anymore.
+   */
   nextMilestone: PreviewRow | null;
-  /** The most recently passed milestone (what was missed) — set only when phase is 'overdue'. */
-  overdueMilestone: PreviewRow | null;
+  /**
+   * Every pre-event milestone whose time has already passed, oldest missed
+   * first — never just the latest one, so a parent who missed Leave Home
+   * AND Arrive sees both, not only the most recent. Empty unless phase is
+   * 'overdue'.
+   */
+  overdueMilestones: PreviewRow[];
 }
 
 /** computeTimelinePreview's fixed id for the Event Starts milestone row. */
 const EVENT_START_ROW_ID = '__event_start';
+
+function byTimeAscending(a: PreviewRow, b: PreviewRow): number {
+  return a.time.getTime() - b.time.getTime();
+}
 
 /**
  * Computes the current phase for one occurrence.
@@ -36,17 +52,19 @@ const EVENT_START_ROW_ID = '__event_start';
  *   deadlines stop being actionable the instant the event starts, per the
  *   approved product decision — no milestone is surfaced in this phase.
  * - Otherwise (event hasn't started): Event Starts itself is always still in
- *   the future at this point (that's what "hasn't started" means), so it is
- *   deliberately excluded from the overdue/upcoming decision below — only
- *   the PRE-event milestones (Leave Home, Arrive, prep steps) decide that,
- *   since those are the ones a parent can actually still miss:
+ *   the future at this point (that's what "hasn't started" means), so it's
+ *   excluded from the PRE-event milestone set below (Leave Home, Arrive,
+ *   prep steps) — those are the ones a parent can actually still miss, and
+ *   missing ANY of them (not just all of them) is reported immediately:
+ *     - At least one pre-event milestone has already passed -> 'overdue',
+ *       listing every one that's passed (oldest first) in overdueMilestones,
+ *       while nextMilestone still points at the soonest one that HASN'T
+ *       passed yet (or Event Starts, if none remain) — overdue and "still
+ *       something you can act on" are not mutually exclusive.
+ *     - None have passed, but at least one is still ahead -> 'upcoming',
+ *       surfacing the soonest.
  *     - No pre-event milestone is configured at all -> 'upcoming', with
  *       Event Starts itself as the next milestone (e.g. "Starts in 12 min").
- *     - At least one pre-event milestone is still in the future -> 'upcoming',
- *       surfacing the soonest of those (never Event Starts, as long as a
- *       nearer pre-event deadline still exists).
- *     - Every pre-event milestone has already passed -> 'overdue',
- *       surfacing the most recently missed one — never silently dropped.
  *
  * A milestone whose time exactly equals `now` counts as already passed, not
  * upcoming — "due this instant" reads as something to act on now, not later.
@@ -60,36 +78,29 @@ export function computeActivityStatus(
   const nowMs = now.getTime();
 
   if (nowMs >= eventEnd.getTime()) {
-    return { phase: 'completed', nextMilestone: null, overdueMilestone: null };
+    return { phase: 'completed', nextMilestone: null, overdueMilestones: [] };
   }
   if (nowMs >= eventStart.getTime()) {
-    return { phase: 'in_progress', nextMilestone: null, overdueMilestone: null };
+    return { phase: 'in_progress', nextMilestone: null, overdueMilestones: [] };
   }
 
   const eventStartRow = scheduledMilestones.find((m) => m.id === EVENT_START_ROW_ID) ?? null;
   const preEventMilestones = scheduledMilestones.filter((m) => m.id !== EVENT_START_ROW_ID);
 
-  let soonestFuture: PreviewRow | null = null;
-  let latestPast: PreviewRow | null = null;
+  const future: PreviewRow[] = [];
+  const past: PreviewRow[] = [];
   for (const milestone of preEventMilestones) {
-    const t = milestone.time.getTime();
-    if (t > nowMs) {
-      if (soonestFuture === null || t < soonestFuture.time.getTime()) soonestFuture = milestone;
-    } else {
-      if (latestPast === null || t > latestPast.time.getTime()) latestPast = milestone;
-    }
+    (milestone.time.getTime() > nowMs ? future : past).push(milestone);
   }
+  future.sort(byTimeAscending);
+  past.sort(byTimeAscending);
 
-  if (soonestFuture !== null) {
-    return { phase: 'upcoming', nextMilestone: soonestFuture, overdueMilestone: null };
+  const nextMilestone = future[0] ?? eventStartRow;
+
+  if (past.length > 0) {
+    return { phase: 'overdue', nextMilestone, overdueMilestones: past };
   }
-  if (latestPast !== null) {
-    return { phase: 'overdue', nextMilestone: null, overdueMilestone: latestPast };
-  }
-  // No pre-event milestone configured at all (no arrival buffer, no travel
-  // time, no prep steps) — Event Starts is the only milestone there is, and
-  // it's still ahead of us, so this is 'upcoming', not 'overdue'.
-  return { phase: 'upcoming', nextMilestone: eventStartRow, overdueMilestone: null };
+  return { phase: 'upcoming', nextMilestone, overdueMilestones: [] };
 }
 
 const PHASE_RANK: Record<ActivityPhase, number> = {
@@ -110,12 +121,19 @@ export interface RankableActivity {
  * preparation or departure milestone" rule, generalized across several
  * occurrences at once:
  *
- *  - overdue activities sort first, ordered by soonest event start (the one
- *    with the least slack left is the most urgent to resolve).
- *  - upcoming activities sort next, ordered by their own soonest next
- *    milestone time (never by event start — a soon-to-start event whose
- *    leave-home time is far off is less urgent than one leaving in 5
- *    minutes even if it starts later).
+ *  - every overdue activity outranks every non-overdue one, full stop,
+ *    however close or far its own next deadline is — missing a deadline
+ *    always demands attention before a still-on-schedule one.
+ *  - WITHIN overdue, and within upcoming, the tie-break is identical: rank
+ *    by the soonest still-reachable deadline (`nextMilestone`, falling back
+ *    to event start when nothing remains) — never by event start directly,
+ *    since a later-starting activity can easily have the nearer deadline
+ *    (e.g. its leave-home time is in 5 minutes while an earlier-starting
+ *    one's next deadline is 20 minutes off). An overdue activity with
+ *    nothing left to do but wait for the event (nextMilestone falls back to
+ *    Event Starts) still outranks every upcoming one via the phase gate
+ *    above, and among other overdue activities sorts by how soon ITS event
+ *    starts, via that same fallback.
  *  - in_progress activities sort next (nothing pre-event left to act on),
  *    ordered by soonest end time — the one wrapping up soonest is the most
  *    relevant to still be showing.
@@ -128,7 +146,6 @@ export function compareActivityUrgency(a: RankableActivity, b: RankableActivity)
 
   switch (a.status.phase) {
     case 'overdue':
-      return a.eventStart.getTime() - b.eventStart.getTime();
     case 'upcoming': {
       const at = a.status.nextMilestone?.time.getTime() ?? a.eventStart.getTime();
       const bt = b.status.nextMilestone?.time.getTime() ?? b.eventStart.getTime();

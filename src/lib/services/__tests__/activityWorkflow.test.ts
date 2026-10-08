@@ -242,7 +242,18 @@ describe('listTodayActivityWorkflow — phases', () => {
     mockPrepStepsQuery([]);
     const [item] = await listTodayActivityWorkflow(new Date('2026-10-08T17:45:00.000Z'));
     expect(item!.status.phase).toBe('overdue');
-    expect(item!.status.overdueMilestone?.label).toBe('Arrive');
+    expect(item!.status.overdueMilestones.map((m) => m.label)).toEqual(['Leave home', 'Arrive']);
+    expect(item!.status.nextMilestone?.label).toBe('Event starts');
+  });
+
+  it('reports overdue for a missed early deadline while a later one is still reachable, surfacing both', async () => {
+    mockTimezoneSelect('UTC');
+    mockMainQuery([baseRow()]); // arrival 17:30, leave-home 17:10, event 18:00
+    mockPrepStepsQuery([]);
+    const [item] = await listTodayActivityWorkflow(new Date('2026-10-08T17:20:00.000Z')); // leave-home passed, arrival has not
+    expect(item!.status.phase).toBe('overdue');
+    expect(item!.status.overdueMilestones.map((m) => m.label)).toEqual(['Leave home']);
+    expect(item!.status.nextMilestone?.label).toBe('Arrive');
   });
 
   it('reports in_progress once the event has started and has not ended', async () => {
