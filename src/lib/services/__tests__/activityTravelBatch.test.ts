@@ -28,8 +28,9 @@ jest.mock('@/lib/db/schema', () => ({
     locationOverride: 'activityEventLinks.locationOverride',
     travelMeta: 'activityEventLinks.travelMeta',
   },
-  events: { id: 'events.id', location: 'events.location', startTime: 'events.startTime' },
-  activityProfiles: { id: 'activityProfiles.id', defaultLocation: 'activityProfiles.defaultLocation' },
+  events: { id: 'events.id', title: 'events.title', location: 'events.location', startTime: 'events.startTime' },
+  activityProfiles: { id: 'activityProfiles.id', defaultLocation: 'activityProfiles.defaultLocation', travelMinutes: 'activityProfiles.travelMinutes' },
+  users: { id: 'users.id', name: 'users.name' },
 }));
 
 jest.mock('drizzle-orm', () => ({
@@ -38,6 +39,7 @@ jest.mock('drizzle-orm', () => ({
   gte: (...a: unknown[]) => ({ op: 'gte', a }),
   lt: (...a: unknown[]) => ({ op: 'lt', a }),
   inArray: (...a: unknown[]) => ({ op: 'inArray', a }),
+  asc: (col: unknown) => ({ op: 'asc', col }),
 }));
 
 const mockGeocodeAddress = jest.fn();
@@ -51,7 +53,12 @@ jest.mock('@/lib/integrations/routing', () => ({
 const mockGetHomeAddress = jest.fn();
 jest.mock('@/lib/services/homeAddress', () => ({ getHomeAddress: (...a: unknown[]) => mockGetHomeAddress(...a) }));
 
-import { recomputeActivityTravelForUpcoming, recomputeActivityTravelForLink } from '../activityTravel';
+import {
+  recomputeActivityTravelForUpcoming,
+  recomputeActivityTravelForLink,
+  listUpcomingActivityTravel,
+  setActivityDepartureOverride,
+} from '../activityTravel';
 
 const HOME = { address: '1 Home Way', lat: 40, lon: -75 };
 
@@ -72,6 +79,39 @@ function mockUpdateChain() {
   const set = jest.fn().mockReturnValue({ where });
   mockUpdate.mockReturnValue({ set });
   return { set, where };
+}
+
+/** For listUpcomingActivityTravel's chain: select -> from -> innerJoin -> leftJoin -> leftJoin -> where -> orderBy. */
+function mockListSelectChain(rows: unknown[]) {
+  mockSelect.mockReturnValue({
+    from: () => ({
+      innerJoin: () => ({
+        leftJoin: () => ({
+          leftJoin: () => ({
+            where: () => ({ orderBy: () => rows }),
+          }),
+        }),
+      }),
+    }),
+  });
+}
+
+function listRow(overrides: Record<string, unknown> = {}) {
+  return {
+    linkId: 'link-1',
+    departureLocationOverride: null,
+    travelMinutesOverride: null,
+    locationOverride: null,
+    travelMeta: null,
+    eventId: 'event-1',
+    eventTitle: 'Hockey Practice',
+    eventLocation: 'Rink B',
+    eventStart: new Date('2026-10-10T18:00:00.000Z'),
+    memberName: 'Beckham',
+    profileTravelMinutes: null,
+    profileDefaultLocation: null,
+    ...overrides,
+  };
 }
 
 function baseRow(overrides: Record<string, unknown> = {}) {
@@ -199,5 +239,64 @@ describe('recomputeActivityTravelForLink', () => {
     const result = await recomputeActivityTravelForLink('link-1');
     expect(result).toEqual({ found: true, travelMeta: null });
     expect(mockUpdate).not.toHaveBeenCalled();
+  });
+});
+
+describe('listUpcomingActivityTravel', () => {
+  it('returns [] when there are no upcoming settled links', async () => {
+    mockListSelectChain([]);
+    expect(await listUpcomingActivityTravel()).toEqual([]);
+  });
+
+  it('maps a row with a manual override to travelSource manual_override', async () => {
+    mockListSelectChain([listRow({ travelMinutesOverride: 12 })]);
+    const [item] = await listUpcomingActivityTravel();
+    expect(item).toMatchObject({ linkId: 'link-1', eventTitle: 'Hockey Practice', memberName: 'Beckham', destination: 'Rink B', travelSource: 'manual_override', travelMinutes: 12 });
+  });
+
+  it('maps a row with a successful travel_meta to travelSource calculated', async () => {
+    mockListSelectChain([listRow({ travelMeta: { status: 'ok', minutes: 18, provider: 'openrouteservice', calculatedAt: '2026-01-01T00:00:00.000Z', distanceMeters: 1, durationSeconds: 1, departureInputHash: 'a', destinationInputHash: 'b', failureReason: null } })]);
+    const [item] = await listUpcomingActivityTravel();
+    expect(item).toMatchObject({ travelSource: 'calculated', travelMinutes: 18 });
+  });
+
+  it('maps a row with no override/calculation but a profile fallback to travelSource profile_fallback', async () => {
+    mockListSelectChain([listRow({ profileTravelMinutes: 25 })]);
+    const [item] = await listUpcomingActivityTravel();
+    expect(item).toMatchObject({ travelSource: 'profile_fallback', travelMinutes: 25 });
+  });
+
+  it('maps a row with nothing configured to travelSource unavailable', async () => {
+    mockListSelectChain([listRow()]);
+    const [item] = await listUpcomingActivityTravel();
+    expect(item).toMatchObject({ travelSource: 'unavailable', travelMinutes: null });
+  });
+
+  it('surfaces the raw departureLocationOverride for the UI to edit', async () => {
+    mockListSelectChain([listRow({ departureLocationOverride: '42 Side St' })]);
+    const [item] = await listUpcomingActivityTravel();
+    expect(item?.departureLocationOverride).toBe('42 Side St');
+  });
+
+  it('resolves destination via the same override -> event -> profile precedence used elsewhere', async () => {
+    mockListSelectChain([listRow({ locationOverride: 'Override Rink', eventLocation: 'Event Rink', profileDefaultLocation: 'Default Rink' })]);
+    const [item] = await listUpcomingActivityTravel();
+    expect(item?.destination).toBe('Override Rink');
+  });
+});
+
+describe('setActivityDepartureOverride', () => {
+  it('writes the override and never touches the Home address setting (no getHomeAddress call)', async () => {
+    const { set, where } = mockUpdateChain();
+    await setActivityDepartureOverride('link-1', '42 Side St');
+    expect(set).toHaveBeenCalledWith(expect.objectContaining({ departureLocationOverride: '42 Side St' }));
+    expect(where).toHaveBeenCalled();
+    expect(mockGetHomeAddress).not.toHaveBeenCalled();
+  });
+
+  it('clears the override when passed null', async () => {
+    const { set } = mockUpdateChain();
+    await setActivityDepartureOverride('link-1', null);
+    expect(set).toHaveBeenCalledWith(expect.objectContaining({ departureLocationOverride: null }));
   });
 });

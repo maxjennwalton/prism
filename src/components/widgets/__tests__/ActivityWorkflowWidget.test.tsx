@@ -55,6 +55,7 @@ function activity(overrides: Partial<Record<string, unknown>> = {}) {
     location: 'Community Rink',
     arrivalTime: new Date('2026-10-08T17:30:00.000Z'),
     leaveHomeTime: new Date('2026-10-08T17:10:00.000Z'),
+    travelSource: 'profile_fallback',
     prepSteps: [],
     status: {
       phase: 'upcoming',
@@ -380,5 +381,36 @@ describe('ActivityWorkflowWidget — phase display', () => {
     // hero's kicker label above the actual end time.
     expect(screen.getAllByText('In progress').length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText(/^Ends /)).not.toBeNull();
+  });
+});
+
+describe('ActivityWorkflowWidget — Phase 4B: required travel-source display labels', () => {
+  it('shows "Manual override" when travelSource is manual_override', () => {
+    mockUseActivityWorkflow.mockReturnValue({ items: [activity({ travelSource: 'manual_override' })], loading: false, error: null });
+    render(<ActivityWorkflowWidget />);
+    expect(screen.getByText('Manual override')).not.toBeNull();
+  });
+
+  it('shows "Calculated driving estimate" when travelSource is calculated', () => {
+    mockUseActivityWorkflow.mockReturnValue({ items: [activity({ travelSource: 'calculated' })], loading: false, error: null });
+    render(<ActivityWorkflowWidget />);
+    expect(screen.getByText('Calculated driving estimate')).not.toBeNull();
+  });
+
+  it('shows "Profile fallback" when travelSource is profile_fallback', () => {
+    mockUseActivityWorkflow.mockReturnValue({ items: [activity({ travelSource: 'profile_fallback' })], loading: false, error: null });
+    render(<ActivityWorkflowWidget />);
+    expect(screen.getByText('Profile fallback')).not.toBeNull();
+  });
+
+  it('shows "Travel time needed" when travelSource is unavailable, alongside "Not calculated" for Leave home', () => {
+    mockUseActivityWorkflow.mockReturnValue({
+      items: [activity({ travelSource: 'unavailable', leaveHomeTime: null })],
+      loading: false,
+      error: null,
+    });
+    render(<ActivityWorkflowWidget />);
+    expect(screen.getByText('Travel time needed')).not.toBeNull();
+    expect(screen.getByText('Not calculated')).not.toBeNull();
   });
 });

@@ -22,13 +22,19 @@
  *    this is the "bounded refresh" Phase 4B requires. `forceRefresh`
  *    (the manual refresh action) bypasses this reuse.
  */
-import { and, eq, gte, inArray, lt } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, lt } from 'drizzle-orm';
 import { geocodeAddress } from '@/lib/integrations/geocode';
 import { getRoutingProvider } from '@/lib/integrations/routing';
 import { resolveEffectiveLocation } from '@/lib/utils/activityWorkflowTiming';
-import { hashTravelLocation, hashTravelText, isAmbiguousGeocodeMatch } from '@/lib/utils/activityTravelResolution';
+import {
+  hashTravelLocation,
+  hashTravelText,
+  isAmbiguousGeocodeMatch,
+  resolveEffectiveTravel,
+  type ActivityTravelSource,
+} from '@/lib/utils/activityTravelResolution';
 import { db, type DbExecutor } from '@/lib/db/client';
-import { activityEventLinks, activityProfiles, events, type ActivityTravelMeta } from '@/lib/db/schema';
+import { activityEventLinks, activityProfiles, events, users, type ActivityTravelMeta } from '@/lib/db/schema';
 import { getHomeAddress } from '@/lib/services/homeAddress';
 
 const REFRESH_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -315,4 +321,107 @@ export async function recomputeActivityTravelForLink(
   }
 
   return { found: true, travelMeta: result };
+}
+
+export interface ActivityTravelListItem {
+  linkId: string;
+  eventId: string;
+  eventTitle: string;
+  eventStart: Date;
+  memberName: string | null;
+  /** Effective destination text (locationOverride -> event.location -> profile.defaultLocation -> null). */
+  destination: string | null;
+  /** Raw per-event departure override, if any — null means "depart from Home". */
+  departureLocationOverride: string | null;
+  travelMinutesOverride: number | null;
+  travelMeta: ActivityTravelMeta | null;
+  travelSource: ActivityTravelSource;
+  travelMinutes: number | null;
+}
+
+/**
+ * Lists every settled, upcoming activity occurrence with its travel
+ * configuration — the data source for the Activity Profiles settings
+ * panel where a parent can set a per-event departure override or trigger
+ * a manual refresh. Read-only; never computes or writes anything.
+ */
+export async function listUpcomingActivityTravel(
+  executor: DbExecutor = db,
+  now: Date = new Date(),
+  windowDays: number = ACTIVITY_TRAVEL_WINDOW_DAYS,
+): Promise<ActivityTravelListItem[]> {
+  const to = new Date(now.getTime() + windowDays * 24 * 60 * 60 * 1000);
+
+  const rows = await executor
+    .select({
+      linkId: activityEventLinks.id,
+      departureLocationOverride: activityEventLinks.departureLocationOverride,
+      travelMinutesOverride: activityEventLinks.travelMinutesOverride,
+      locationOverride: activityEventLinks.locationOverride,
+      travelMeta: activityEventLinks.travelMeta,
+      eventId: events.id,
+      eventTitle: events.title,
+      eventLocation: events.location,
+      eventStart: events.startTime,
+      memberName: users.name,
+      profileTravelMinutes: activityProfiles.travelMinutes,
+      profileDefaultLocation: activityProfiles.defaultLocation,
+    })
+    .from(activityEventLinks)
+    .innerJoin(events, eq(activityEventLinks.eventId, events.id))
+    .leftJoin(activityProfiles, eq(activityEventLinks.activityProfileId, activityProfiles.id))
+    .leftJoin(users, eq(activityEventLinks.assignedMemberId, users.id))
+    .where(
+      and(
+        inArray(activityEventLinks.matchStatus, SETTLED_MATCH_STATUSES),
+        gte(events.startTime, now),
+        lt(events.startTime, to),
+      ),
+    )
+    .orderBy(asc(events.startTime));
+
+  return rows.map((r) => {
+    const destination = resolveEffectiveLocation(r.locationOverride, r.eventLocation, r.profileDefaultLocation ?? null);
+    const travel = resolveEffectiveTravel({
+      travelMinutesOverride: r.travelMinutesOverride,
+      calculation: r.travelMeta,
+      currentDepartureInputHash: r.travelMeta?.departureInputHash ?? null,
+      currentDestinationInputHash: r.travelMeta?.destinationInputHash ?? null,
+      profileTravelMinutes: r.profileTravelMinutes ?? null,
+    });
+
+    return {
+      linkId: r.linkId,
+      eventId: r.eventId,
+      eventTitle: r.eventTitle,
+      eventStart: r.eventStart,
+      memberName: r.memberName,
+      destination,
+      departureLocationOverride: r.departureLocationOverride,
+      travelMinutesOverride: r.travelMinutesOverride,
+      travelMeta: r.travelMeta,
+      travelSource: travel.source,
+      travelMinutes: travel.minutes,
+    };
+  });
+}
+
+/**
+ * Sets (or clears, with null) the per-event departure override. Never
+ * touches the Home address setting — this is purely a per-event column —
+ * and never geocodes or validates the text itself; that happens the next
+ * time travel is computed for this link (see computeActivityTravel),
+ * which the caller typically triggers immediately afterward via
+ * recomputeActivityTravelForLink(linkId) so the UI reflects the change
+ * without waiting for the next cron tick.
+ */
+export async function setActivityDepartureOverride(
+  linkId: string,
+  departureLocationOverride: string | null,
+  executor: DbExecutor = db,
+): Promise<void> {
+  await executor
+    .update(activityEventLinks)
+    .set({ departureLocationOverride, updatedAt: new Date() })
+    .where(eq(activityEventLinks.id, linkId));
 }

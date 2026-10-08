@@ -21,6 +21,7 @@ function rawItem(overrides: Partial<Record<string, unknown>> = {}) {
     location: 'Community Rink',
     arrivalTime: '2026-10-08T17:30:00.000Z',
     leaveHomeTime: '2026-10-08T17:10:00.000Z',
+    travelSource: 'profile_fallback',
     prepSteps: [],
     ...overrides,
   };
@@ -45,6 +46,7 @@ describe('useActivityWorkflow — fetch + parse', () => {
     expect(result.current.items).toHaveLength(1);
     expect(result.current.items[0]!.eventStart).toEqual(new Date('2026-10-08T18:00:00.000Z'));
     expect(result.current.items[0]!.arrivalTime).toEqual(new Date('2026-10-08T17:30:00.000Z'));
+    expect(result.current.items[0]!.travelSource).toBe('profile_fallback');
   });
 
   it('exposes `now` so callers never need to call Date.now() themselves during render', async () => {

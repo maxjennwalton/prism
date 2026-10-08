@@ -2,11 +2,12 @@
  * @jest-environment node
  *
  * Only the DB layer (db.select) is mocked. The pure helpers this service
- * calls — resolveEffectiveTiming/resolveEffectiveLocation/
- * computeActivityTimeline (activityWorkflowTiming.ts) and
- * computeActivityStatus (activityWorkflowPriority.ts) — run for real, so
- * these tests exercise the actual integration between the query shape and
- * the timeline/priority arithmetic, not a stubbed stand-in for it.
+ * calls — resolveEffectiveMinutes/resolveEffectiveLocation/
+ * computeActivityTimeline (activityWorkflowTiming.ts), resolveEffectiveTravel
+ * (activityTravelResolution.ts), and computeActivityStatus
+ * (activityWorkflowPriority.ts) — run for real, so these tests exercise the
+ * actual integration between the query shape and the timeline/priority
+ * arithmetic, not a stubbed stand-in for it.
  */
 const mockSelect = jest.fn();
 
@@ -24,6 +25,7 @@ jest.mock('@/lib/db/schema', () => ({
     arrivalBufferMinutesOverride: 'activityEventLinks.arrivalBufferMinutesOverride',
     travelMinutesOverride: 'activityEventLinks.travelMinutesOverride',
     locationOverride: 'activityEventLinks.locationOverride',
+    travelMeta: 'activityEventLinks.travelMeta',
   },
   events: {
     id: 'events.id', title: 'events.title', location: 'events.location',
@@ -91,6 +93,7 @@ function baseRow(overrides: Partial<Record<string, unknown>> = {}) {
     arrivalBufferMinutesOverride: null,
     travelMinutesOverride: null,
     locationOverride: null,
+    travelMeta: null,
     assignedMemberId: 'member-beckham',
     activityProfileId: 'profile-hockey',
     eventId: 'event-1',
@@ -312,5 +315,59 @@ describe('listTodayActivityWorkflow — Phase 4A-final acceptance: leave-home ne
     expect(item!.eventStart.toISOString()).toBe('2026-10-08T18:00:00.000Z');
     expect(item!.arrivalTime?.toISOString()).toBe('2026-10-08T17:30:00.000Z');
     expect(item!.leaveHomeTime?.toISOString()).toBe('2026-10-08T17:10:00.000Z');
+  });
+});
+
+describe('listTodayActivityWorkflow — Phase 4B: travelSource precedence', () => {
+  it('reports manual_override when a per-event travelMinutesOverride is set, even to 0', async () => {
+    mockTimezoneSelect('UTC');
+    mockMainQuery([baseRow({
+      travelMinutesOverride: 0,
+      profileTravelMinutes: 20,
+      travelMeta: { status: 'ok', minutes: 99, provider: 'openrouteservice', calculatedAt: '2026-01-01T00:00:00.000Z', distanceMeters: 1, durationSeconds: 1, departureInputHash: 'a', destinationInputHash: 'b', failureReason: null },
+    })]);
+    mockPrepStepsQuery([]);
+    const [item] = await listTodayActivityWorkflow(new Date('2026-10-08T16:00:00.000Z'));
+    expect(item!.travelSource).toBe('manual_override');
+  });
+
+  it('reports calculated when a successful travel_meta exists and there is no manual override', async () => {
+    mockTimezoneSelect('UTC');
+    mockMainQuery([baseRow({
+      travelMinutesOverride: null,
+      profileTravelMinutes: 20,
+      travelMeta: { status: 'ok', minutes: 15, provider: 'openrouteservice', calculatedAt: '2026-01-01T00:00:00.000Z', distanceMeters: 1, durationSeconds: 900, departureInputHash: 'a', destinationInputHash: 'b', failureReason: null },
+    })]);
+    mockPrepStepsQuery([]);
+    const [item] = await listTodayActivityWorkflow(new Date('2026-10-08T16:00:00.000Z'));
+    expect(item!.travelSource).toBe('calculated');
+  });
+
+  it('reports profile_fallback when there is no override and no successful travel_meta, but the profile configures a travelMinutes', async () => {
+    mockTimezoneSelect('UTC');
+    mockMainQuery([baseRow({ travelMinutesOverride: null, profileTravelMinutes: 20, travelMeta: null })]);
+    mockPrepStepsQuery([]);
+    const [item] = await listTodayActivityWorkflow(new Date('2026-10-08T16:00:00.000Z'));
+    expect(item!.travelSource).toBe('profile_fallback');
+  });
+
+  it('reports profile_fallback when the stored travel_meta is unavailable (failed calculation)', async () => {
+    mockTimezoneSelect('UTC');
+    mockMainQuery([baseRow({
+      travelMinutesOverride: null,
+      profileTravelMinutes: 20,
+      travelMeta: { status: 'unavailable', minutes: null, provider: 'openrouteservice', calculatedAt: '2026-01-01T00:00:00.000Z', distanceMeters: null, durationSeconds: null, departureInputHash: 'a', destinationInputHash: 'b', failureReason: 'provider_timeout' },
+    })]);
+    mockPrepStepsQuery([]);
+    const [item] = await listTodayActivityWorkflow(new Date('2026-10-08T16:00:00.000Z'));
+    expect(item!.travelSource).toBe('profile_fallback');
+  });
+
+  it('reports unavailable when nothing is configured at all', async () => {
+    mockTimezoneSelect('UTC');
+    mockMainQuery([baseRow({ travelMinutesOverride: null, profileTravelMinutes: null, travelMeta: null })]);
+    mockPrepStepsQuery([]);
+    const [item] = await listTodayActivityWorkflow(new Date('2026-10-08T16:00:00.000Z'));
+    expect(item!.travelSource).toBe('unavailable');
   });
 });

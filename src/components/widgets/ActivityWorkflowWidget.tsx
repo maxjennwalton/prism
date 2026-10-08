@@ -10,6 +10,7 @@ import { formatDisplayTime } from '@/lib/utils/timeFormat';
 import { formatCountdownLabel } from '@/lib/utils/activityWorkflowCountdown';
 import { useActivityWorkflow, type ActivityWorkflowActivity, type ActivityWorkflowPrepStep } from '@/lib/hooks/useActivityWorkflow';
 import type { ActivityPhase, ActivityWorkflowStatus } from '@/lib/utils/activityWorkflowPriority';
+import { travelSourceLabel } from '@/lib/utils/activityTravelResolution';
 
 export interface ActivityWorkflowWidgetProps {
   className?: string;
@@ -169,6 +170,7 @@ function MilestoneStrip({ activity, fmtTime, narrow }: { activity: ActivityWorkf
           <div className={cn('leading-tight truncate', activity.leaveHomeTime ? 'text-base font-bold' : 'text-sm italic text-muted-foreground font-normal')}>
             {activity.leaveHomeTime ? fmtTime(activity.leaveHomeTime) : 'Not calculated'}
           </div>
+          <div className="text-[10px] text-muted-foreground truncate">{travelSourceLabel(activity.travelSource)}</div>
         </div>
       </div>
       <div className={cn('flex gap-4 text-xs shrink-0', narrow && 'pl-5')}>

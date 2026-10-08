@@ -8,6 +8,7 @@ import {
   sortByUrgency,
   type ActivityWorkflowStatus,
 } from '@/lib/utils/activityWorkflowPriority';
+import type { ActivityTravelSource } from '@/lib/utils/activityTravelResolution';
 
 export interface ActivityWorkflowPrepStep {
   id: string;
@@ -33,6 +34,8 @@ export interface ActivityWorkflowActivity {
   location: string | null;
   arrivalTime: Date | null;
   leaveHomeTime: Date | null;
+  /** Where the effective travel time came from — drives the required display label. See activityTravelResolution.ts. */
+  travelSource: ActivityTravelSource;
   prepSteps: ActivityWorkflowPrepStep[];
   /** Recomputed locally on every countdown tick against the current time — never a stale server snapshot. */
   status: ActivityWorkflowStatus;
@@ -62,6 +65,7 @@ interface RawActivityItem {
   location: string | null;
   arrivalTime: string | null;
   leaveHomeTime: string | null;
+  travelSource: ActivityTravelSource;
   prepSteps: RawPrepStep[];
 }
 
@@ -88,6 +92,7 @@ function parseItem(raw: RawActivityItem): ParsedActivity {
     location: raw.location,
     arrivalTime: raw.arrivalTime ? new Date(raw.arrivalTime) : null,
     leaveHomeTime: raw.leaveHomeTime ? new Date(raw.leaveHomeTime) : null,
+    travelSource: raw.travelSource,
     prepSteps: (raw.prepSteps ?? []).map((s) => ({ ...s, time: s.time ? new Date(s.time) : null })),
   };
 }

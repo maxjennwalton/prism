@@ -28,10 +28,11 @@ import {
 } from '@/lib/db/schema';
 import { todayBoundsInZone } from '@/lib/utils/timezone';
 import {
-  resolveEffectiveTiming,
+  resolveEffectiveMinutes,
   resolveEffectiveLocation,
   computeActivityTimeline,
 } from '@/lib/utils/activityWorkflowTiming';
+import { resolveEffectiveTravel, type ActivityTravelSource } from '@/lib/utils/activityTravelResolution';
 import { computeActivityStatus, type ActivityWorkflowStatus } from '@/lib/utils/activityWorkflowPriority';
 import type { TimelinePreviewPrepStep } from '@/lib/utils/activityTimelinePreview';
 
@@ -75,6 +76,15 @@ export interface ActivityWorkflowItem {
   location: string | null;
   arrivalTime: Date | null;
   leaveHomeTime: Date | null;
+  /**
+   * Where the effective travel time came from (Phase 4B) — manual
+   * per-event override, a calculated route, the profile's own fallback
+   * minutes, or none of those configured. Drives the required display
+   * label (see travelSourceLabel in activityTravelResolution.ts); never
+   * inferred from the minutes value alone, since a calculated/fallback 0
+   * and an unconfigured 0 must never look the same.
+   */
+  travelSource: ActivityTravelSource;
   prepSteps: ActivityWorkflowPrepStepView[];
   status: ActivityWorkflowStatus;
 }
@@ -166,6 +176,7 @@ export async function listTodayActivityWorkflow(
       arrivalBufferMinutesOverride: activityEventLinks.arrivalBufferMinutesOverride,
       travelMinutesOverride: activityEventLinks.travelMinutesOverride,
       locationOverride: activityEventLinks.locationOverride,
+      travelMeta: activityEventLinks.travelMeta,
       assignedMemberId: activityEventLinks.assignedMemberId,
       activityProfileId: activityEventLinks.activityProfileId,
       eventId: events.id,
@@ -208,10 +219,25 @@ export async function listTodayActivityWorkflow(
 
   return rows.map((r) => {
     const prepSteps = r.activityProfileId ? prepStepsByProfile.get(r.activityProfileId) ?? [] : [];
-    const effective = resolveEffectiveTiming(
-      { arrivalBufferMinutesOverride: r.arrivalBufferMinutesOverride, travelMinutesOverride: r.travelMinutesOverride },
-      { arrivalBufferMinutes: r.profileArrivalBufferMinutes ?? null, travelMinutes: r.profileTravelMinutes ?? null },
-    );
+
+    const arrivalBufferMinutes = resolveEffectiveMinutes(r.arrivalBufferMinutesOverride, r.profileArrivalBufferMinutes ?? null);
+
+    // Phase 4B: travel time has its own 4-tier precedence (manual override
+    // -> calculated route -> profile fallback -> unavailable), distinct from
+    // arrivalBufferMinutes's plain 2-tier one above. The stored travel_meta
+    // is trusted as-is here — its own staleness/invalidation already
+    // happened at write time (see computeActivityTravel), so this read path
+    // never re-geocodes or re-verifies on a dashboard poll; passing its own
+    // hashes back as "current" simply means "use it if it's marked ok".
+    const travelResolution = resolveEffectiveTravel({
+      travelMinutesOverride: r.travelMinutesOverride,
+      calculation: r.travelMeta,
+      currentDepartureInputHash: r.travelMeta?.departureInputHash ?? null,
+      currentDestinationInputHash: r.travelMeta?.destinationInputHash ?? null,
+      profileTravelMinutes: r.profileTravelMinutes ?? null,
+    });
+
+    const effective = { arrivalBufferMinutes, travelMinutes: travelResolution.minutes };
     const timeline = computeActivityTimeline(r.eventStart, effective, prepSteps);
     const status = computeActivityStatus(now, r.eventStart, r.eventEnd, timeline.scheduled);
     const location = resolveEffectiveLocation(r.locationOverride, r.eventLocation, r.profileDefaultLocation ?? null);
@@ -235,6 +261,7 @@ export async function listTodayActivityWorkflow(
       location,
       arrivalTime,
       leaveHomeTime,
+      travelSource: travelResolution.source,
       prepSteps: buildPrepStepViews(prepSteps, timeline.scheduled, timeline.unscheduled),
       status,
     };

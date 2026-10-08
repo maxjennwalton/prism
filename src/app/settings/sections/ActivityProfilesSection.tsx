@@ -13,6 +13,7 @@ import { useActivityProfiles, type ActivityProfileListItem } from '@/lib/hooks/u
 import { ActivityProfileEditorModal } from './activityProfiles/ActivityProfileEditorModal';
 import { ActivityMatchingCard } from './activityProfiles/ActivityMatchingCard';
 import { HomeAddressCard } from './activityProfiles/HomeAddressCard';
+import { ActivityTravelPanel } from './activityProfiles/ActivityTravelPanel';
 
 function summaryLine(p: ActivityProfileListItem): string {
   const parts: string[] = [];
@@ -85,6 +86,7 @@ export function ActivityProfilesSection() {
     <div className="space-y-6">
       <HomeAddressCard />
       <ActivityMatchingCard reviewQueueVersion={reviewQueueVersion} onIdentifiersSaved={bumpReviewQueueVersion} />
+      <ActivityTravelPanel />
 
       <div className="flex items-center justify-between">
         <div>

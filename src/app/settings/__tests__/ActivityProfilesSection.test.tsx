@@ -57,6 +57,10 @@ jest.mock('../sections/activityProfiles/HomeAddressCard', () => ({
   HomeAddressCard: () => null,
 }));
 
+jest.mock('../sections/activityProfiles/ActivityTravelPanel', () => ({
+  ActivityTravelPanel: () => null,
+}));
+
 type CardProps = { reviewQueueVersion: number; onIdentifiersSaved: () => void };
 type ModalProps = { profileId: string | null | undefined; onSaved: () => void | Promise<void> };
 
