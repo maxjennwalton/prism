@@ -12,6 +12,7 @@ import { RemovedItemsManager } from '@/components/settings/RemovedItemsManager';
 import { useActivityProfiles, type ActivityProfileListItem } from '@/lib/hooks/useActivityProfiles';
 import { ActivityProfileEditorModal } from './activityProfiles/ActivityProfileEditorModal';
 import { ActivityMatchingCard } from './activityProfiles/ActivityMatchingCard';
+import { HomeAddressCard } from './activityProfiles/HomeAddressCard';
 
 function summaryLine(p: ActivityProfileListItem): string {
   const parts: string[] = [];
@@ -82,6 +83,7 @@ export function ActivityProfilesSection() {
 
   return (
     <div className="space-y-6">
+      <HomeAddressCard />
       <ActivityMatchingCard reviewQueueVersion={reviewQueueVersion} onIdentifiersSaved={bumpReviewQueueVersion} />
 
       <div className="flex items-center justify-between">
