@@ -1,4 +1,10 @@
-import { computeActivityStatus, compareActivityUrgency, sortByUrgency, type RankableActivity } from '../activityWorkflowPriority';
+import {
+  computeActivityStatus,
+  compareActivityUrgency,
+  sortByUrgency,
+  buildScheduledMilestones,
+  type RankableActivity,
+} from '../activityWorkflowPriority';
 import type { PreviewRow } from '../activityTimelinePreview';
 
 function at(hh: number, mm: number): Date {
@@ -165,5 +171,47 @@ describe('compareActivityUrgency / sortByUrgency — deterministic cross-activit
     const a = sortByUrgency(items);
     const b = [...items].sort(compareActivityUrgency);
     expect(a).toEqual(b);
+  });
+});
+
+describe('buildScheduledMilestones — reconstructs milestones from the flat API/hook shape', () => {
+  it('always includes Event Starts, even with nothing else configured', () => {
+    const rows = buildScheduledMilestones({ eventStart: at(18, 0), arrivalTime: null, leaveHomeTime: null, prepSteps: [] });
+    expect(rows).toEqual([{ id: '__event_start', kind: 'milestone', label: 'Event starts', time: at(18, 0) }]);
+  });
+
+  it('includes Arrive and Leave Home only when they have a real time', () => {
+    const rows = buildScheduledMilestones({
+      eventStart: at(18, 0),
+      arrivalTime: at(17, 30),
+      leaveHomeTime: at(17, 10),
+      prepSteps: [],
+    });
+    expect(rows.map((r) => r.id)).toEqual(['__event_start', '__arrival', '__leave_home']);
+  });
+
+  it('includes only scheduled prep steps, omitting ones with a null time', () => {
+    const rows = buildScheduledMilestones({
+      eventStart: at(18, 0),
+      arrivalTime: null,
+      leaveHomeTime: null,
+      prepSteps: [
+        { id: 'step-1', label: 'Get dressed', kind: 'checkable', time: at(16, 45) },
+        { id: 'step-2', label: 'Pack bag', kind: 'checkable', time: null },
+      ],
+    });
+    expect(rows.map((r) => r.id)).toEqual(['__event_start', 'step-1']);
+  });
+
+  it('round-trips correctly into computeActivityStatus (the actual use case)', () => {
+    const milestones = buildScheduledMilestones({
+      eventStart: at(18, 0),
+      arrivalTime: at(17, 30),
+      leaveHomeTime: at(17, 10),
+      prepSteps: [{ id: 'step-1', label: 'Get dressed', kind: 'checkable', time: at(16, 45) }],
+    });
+    const status = computeActivityStatus(at(17, 20), at(18, 0), at(19, 0), milestones);
+    expect(status.phase).toBe('upcoming');
+    expect(status.nextMilestone?.label).toBe('Arrive');
   });
 });

@@ -145,3 +145,32 @@ export function compareActivityUrgency(a: RankableActivity, b: RankableActivity)
 export function sortByUrgency<T extends RankableActivity>(items: T[]): T[] {
   return [...items].sort(compareActivityUrgency);
 }
+
+export interface ActivityMilestoneSource {
+  eventStart: Date;
+  arrivalTime: Date | null;
+  leaveHomeTime: Date | null;
+  prepSteps: { id: string; label: string; kind: 'checkable' | 'informational'; time: Date | null }[];
+}
+
+/**
+ * Reconstructs the scheduled-milestone list computeActivityStatus needs from
+ * the FLAT fields the read API returns (arrivalTime/leaveHomeTime/prepSteps
+ * with a time-or-null each) rather than computeTimelinePreview's own
+ * richer shape — the client re-derives status locally on every countdown
+ * tick (see useActivityWorkflow) without re-fetching, so it needs this one
+ * small adapter to feed the same pure computeActivityStatus the server
+ * already uses. A prep step with a null time (unscheduled) is simply
+ * omitted — it was never a candidate milestone in the first place.
+ */
+export function buildScheduledMilestones(source: ActivityMilestoneSource): PreviewRow[] {
+  const rows: PreviewRow[] = [
+    { id: '__event_start', kind: 'milestone', label: 'Event starts', time: source.eventStart },
+  ];
+  if (source.arrivalTime) rows.push({ id: '__arrival', kind: 'milestone', label: 'Arrive', time: source.arrivalTime });
+  if (source.leaveHomeTime) rows.push({ id: '__leave_home', kind: 'milestone', label: 'Leave home', time: source.leaveHomeTime });
+  for (const step of source.prepSteps) {
+    if (step.time) rows.push({ id: step.id, kind: step.kind, label: step.label, time: step.time });
+  }
+  return rows;
+}
