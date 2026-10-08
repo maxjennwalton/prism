@@ -38,6 +38,7 @@ import type {
 import type { LocationParam, WeatherOptions } from './weather';
 import { getMoonData } from './moon';
 import { DAYS_SHORT_ARRAY } from '@/lib/constants/days';
+import { zonedTimeToUtc } from '@/lib/utils/timezone';
 
 function defaultImperialUnits(): WeatherUnits {
   return { temperature: 'F', windSpeed: 'mph', precipitation: 'in' };
@@ -163,40 +164,6 @@ function describeWmo(code: number): string {
   return 'Cloudy';
 }
 
-// ---------------------------------------------------------------------------
-// Wall-clock-in-timezone → UTC instant
-// ---------------------------------------------------------------------------
-
-/**
- * Convert a "wall-clock" ISO string ("2026-05-19T05:42", no offset) interpreted
- * in the given IANA timezone into a UTC `Date`. Open-Meteo returns its
- * `sunrise`, `sunset`, and `hourly.time` values in this shape when called with
- * `timezone=auto`, so we need this to land on the correct absolute instant
- * regardless of the runtime's local timezone (which is UTC in our containers).
- *
- * Approach: format the localIso (treated as UTC) in the target zone to read
- * back its longOffset like "GMT-05:00", then subtract that offset from the
- * UTC interpretation. DST transitions are handled implicitly because the
- * offset is recomputed against the actual date.
- */
-function zonedTimeToUtc(localIso: string, timeZone: string): Date {
-  // Treat the wall-clock as UTC for the moment — wrong by the timezone offset.
-  const asUtc = new Date(`${localIso}Z`);
-  // Ask Intl what UTC offset the target zone has at that moment.
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    timeZoneName: 'longOffset',
-    hour12: false,
-  }).formatToParts(asUtc);
-  const offsetName = parts.find((p) => p.type === 'timeZoneName')?.value ?? 'GMT';
-  // "GMT-05:00" → ±HH:MM
-  const m = /([+-])(\d{2}):?(\d{2})/.exec(offsetName);
-  if (!m) return asUtc;
-  const sign = m[1] === '+' ? 1 : -1;
-  const offsetMinutes = sign * (parseInt(m[2]!, 10) * 60 + parseInt(m[3]!, 10));
-  // Subtract the offset to get the real UTC instant for that wall-clock time.
-  return new Date(asUtc.getTime() - offsetMinutes * 60_000);
-}
 
 // ---------------------------------------------------------------------------
 // Main fetch function

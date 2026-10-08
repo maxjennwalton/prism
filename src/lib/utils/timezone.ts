@@ -46,6 +46,68 @@ export function zonedParts(input: string | Date, timeZone: string): { date: Date
   return { date: d, time: '00:00' };
 }
 
+/**
+ * Convert a "wall-clock" ISO string ("2026-05-19T05:42", no offset) interpreted
+ * in the given IANA timezone into a UTC `Date`. Originally written for
+ * Open-Meteo's `timezone=auto` responses (sunrise/sunset/hourly.time come back
+ * in this shape) and promoted here so any other caller needing the reverse of
+ * `zonedParts` — a household wall-clock time back to a real UTC instant —
+ * reuses the same DST-aware arithmetic instead of re-deriving it.
+ *
+ * Approach: format the localIso (treated as UTC) in the target zone to read
+ * back its longOffset like "GMT-05:00", then subtract that offset from the
+ * UTC interpretation. DST transitions are handled implicitly because the
+ * offset is recomputed against the actual date.
+ */
+export function zonedTimeToUtc(localIso: string, timeZone: string): Date {
+  // Treat the wall-clock as UTC for the moment — wrong by the timezone offset.
+  const asUtc = new Date(`${localIso}Z`);
+  // Ask Intl what UTC offset the target zone has at that moment.
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    timeZoneName: 'longOffset',
+    hour12: false,
+  }).formatToParts(asUtc);
+  const offsetName = parts.find((p) => p.type === 'timeZoneName')?.value ?? 'GMT';
+  // "GMT-05:00" → ±HH:MM
+  const m = /([+-])(\d{2}):?(\d{2})/.exec(offsetName);
+  if (!m) return asUtc;
+  const sign = m[1] === '+' ? 1 : -1;
+  const offsetMinutes = sign * (parseInt(m[2]!, 10) * 60 + parseInt(m[3]!, 10));
+  // Subtract the offset to get the real UTC instant for that wall-clock time.
+  return new Date(asUtc.getTime() - offsetMinutes * 60_000);
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
+/**
+ * The [start, end) UTC instants for "today" as a wall clock in `timeZone` —
+ * local midnight through (exclusive) local midnight the next day. Used by
+ * the Activity Workflow widget (Phase 4A) to scope "today's matched
+ * activities" to the household's configured zone rather than the server
+ * process's own (which runs as UTC in our containers and would silently
+ * shift the boundary by hours for every non-UTC household).
+ */
+export function todayBoundsInZone(now: Date, timeZone: string): { start: Date; end: Date } {
+  const { date } = zonedParts(now, timeZone);
+  const y = date.getFullYear();
+  const mo = date.getMonth(); // 0-indexed
+  const d = date.getDate();
+  const start = zonedTimeToUtc(`${y}-${pad2(mo + 1)}-${pad2(d)}T00:00:00`, timeZone);
+  // Add a day to the LOCAL date components (not to the UTC instant) before
+  // re-converting, so a DST transition inside the day changes the elapsed
+  // real time between start/end rather than silently shifting which local
+  // day "end" lands on.
+  const nextDay = new Date(y, mo, d + 1);
+  const end = zonedTimeToUtc(
+    `${nextDay.getFullYear()}-${pad2(nextDay.getMonth() + 1)}-${pad2(nextDay.getDate())}T00:00:00`,
+    timeZone,
+  );
+  return { start, end };
+}
+
 /** Whether a string is a valid IANA timezone the runtime understands. */
 export function isValidTimezone(tz: string): boolean {
   try {

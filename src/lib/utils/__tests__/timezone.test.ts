@@ -1,4 +1,4 @@
-import { zonedParts, isValidTimezone } from '../timezone';
+import { zonedParts, isValidTimezone, zonedTimeToUtc, todayBoundsInZone } from '../timezone';
 
 describe('zonedParts', () => {
   it('converts an absolute instant into the household zone (the meal-time bug)', () => {
@@ -33,5 +33,53 @@ describe('isValidTimezone', () => {
     expect(isValidTimezone('America/Chicago')).toBe(true);
     expect(isValidTimezone('UTC')).toBe(true);
     expect(isValidTimezone('Not/AZone')).toBe(false);
+  });
+});
+
+describe('zonedTimeToUtc — the reverse of zonedParts', () => {
+  it('round-trips with zonedParts for a plain zone/instant', () => {
+    const utc = zonedTimeToUtc('2026-07-25T18:00:00', 'America/Chicago');
+    const { time } = zonedParts(utc, 'America/Chicago');
+    expect(time).toBe('18:00');
+  });
+
+  it('UTC passthrough', () => {
+    const utc = zonedTimeToUtc('2026-07-25T23:00:00', 'UTC');
+    expect(utc.toISOString()).toBe('2026-07-25T23:00:00.000Z');
+  });
+});
+
+describe('todayBoundsInZone — local midnight through (exclusive) local midnight the next day', () => {
+  it('returns the correct UTC instants for a zone behind UTC (America/Chicago, -05:00 in July)', () => {
+    // 2026-07-25 15:00 UTC is 10:00 local in Chicago — still "today" there.
+    const { start, end } = todayBoundsInZone(new Date('2026-07-25T15:00:00Z'), 'America/Chicago');
+    expect(start.toISOString()).toBe('2026-07-25T05:00:00.000Z'); // local midnight the 25th
+    expect(end.toISOString()).toBe('2026-07-26T05:00:00.000Z'); // local midnight the 26th
+  });
+
+  it('returns the correct UTC instants for a zone ahead of UTC (Asia/Tokyo, +09:00)', () => {
+    // 2026-07-25 01:00 UTC is already 10:00 local on the 25th in Tokyo.
+    const { start, end } = todayBoundsInZone(new Date('2026-07-25T01:00:00Z'), 'Asia/Tokyo');
+    expect(start.toISOString()).toBe('2026-07-24T15:00:00.000Z'); // local midnight the 25th, in UTC
+    expect(end.toISOString()).toBe('2026-07-25T15:00:00.000Z'); // local midnight the 26th, in UTC
+  });
+
+  it('lands on the previous UTC day near midnight in an earlier zone (the day-bucketing edge case)', () => {
+    // 00:30 UTC on the 26th is still 19:30 on the 25th in Chicago — "today" must be the 25th.
+    const { start, end } = todayBoundsInZone(new Date('2026-07-26T00:30:00Z'), 'America/Chicago');
+    expect(start.toISOString()).toBe('2026-07-25T05:00:00.000Z');
+    expect(end.toISOString()).toBe('2026-07-26T05:00:00.000Z');
+  });
+
+  it('produces a 23-hour window across a spring-forward DST transition', () => {
+    // America/Chicago springs forward on 2026-03-08 (2am -> 3am CST->CDT).
+    const { start, end } = todayBoundsInZone(new Date('2026-03-08T12:00:00Z'), 'America/Chicago');
+    expect(end.getTime() - start.getTime()).toBe(23 * 60 * 60 * 1000);
+  });
+
+  it('produces a 25-hour window across a fall-back DST transition', () => {
+    // America/Chicago falls back on 2026-11-01.
+    const { start, end } = todayBoundsInZone(new Date('2026-11-01T12:00:00Z'), 'America/Chicago');
+    expect(end.getTime() - start.getTime()).toBe(25 * 60 * 60 * 1000);
   });
 });
