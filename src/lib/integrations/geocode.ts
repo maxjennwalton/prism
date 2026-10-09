@@ -75,12 +75,39 @@ function shortDisplayName(result: NominatimResult): string {
 const GEOCODE_TIMEOUT_MS = 8000;
 const GEOCODE_CACHE_TTL_SECONDS = 60 * 60 * 24;
 
-async function fetchGeocodeResults(query: string, limit: number): Promise<GeocodeResult[]> {
+/**
+ * Optional "prefer results near this point" hint — e.g. a household's own
+ * saved Home coordinates. Soft preference only (Nominatim's `bounded=0`):
+ * it reorders Nominatim's own ranking toward nearby candidates, it never
+ * excludes a genuinely correct distant match (a tournament three towns
+ * over is still findable). Never derived from a hardcoded place or
+ * region — always the caller's own data.
+ */
+export interface GeocodeBias {
+  lat: number;
+  lon: number;
+}
+
+// Half-width of the soft-preference box, in degrees (~220km at mid
+// latitudes) — intentionally generous; this only re-ranks, so a box that's
+// a bit too wide costs nothing, while one that's too narrow would silently
+// stop helping with the exact ambiguous-business-name case this exists for.
+const BIAS_VIEWBOX_DEGREES = 2;
+
+async function fetchGeocodeResults(query: string, limit: number, bias?: GeocodeBias): Promise<GeocodeResult[]> {
   const url = new URL('https://nominatim.openstreetmap.org/search');
   url.searchParams.set('q', query);
   url.searchParams.set('format', 'json');
   url.searchParams.set('addressdetails', '1');
   url.searchParams.set('limit', String(limit));
+  if (bias) {
+    const left = bias.lon - BIAS_VIEWBOX_DEGREES;
+    const right = bias.lon + BIAS_VIEWBOX_DEGREES;
+    const top = bias.lat + BIAS_VIEWBOX_DEGREES;
+    const bottom = bias.lat - BIAS_VIEWBOX_DEGREES;
+    url.searchParams.set('viewbox', `${left},${top},${right},${bottom}`);
+    url.searchParams.set('bounded', '0');
+  }
 
   const response = await withTimeout(
     fetch(url.toString(), {
@@ -127,15 +154,21 @@ async function fetchGeocodeResults(query: string, limit: number): Promise<Geocod
  * "no results" apart from "lookup failed" should treat both the same way
  * Prism already does elsewhere for optional integrations: don't block on it,
  * but don't silently invent a location either.
+ *
+ * `bias`, when given, biases Nominatim's own ranking toward that point
+ * (see GeocodeBias) — the cache key includes it (rounded to ~1km) so two
+ * households geocoding the same text with different bias points, or the
+ * same household's own biased vs. unbiased lookups, never collide.
  */
-export async function geocodeAddress(query: string, limit = 5): Promise<GeocodeResult[]> {
+export async function geocodeAddress(query: string, limit = 5, bias?: GeocodeBias): Promise<GeocodeResult[]> {
   const trimmed = query.trim();
   if (trimmed.length < 2) return [];
 
-  const cacheKey = `geocode:v1:${trimmed.toLowerCase()}:${limit}`;
+  const biasKey = bias ? `:bias=${bias.lat.toFixed(2)},${bias.lon.toFixed(2)}` : '';
+  const cacheKey = `geocode:v1:${trimmed.toLowerCase()}:${limit}${biasKey}`;
 
   try {
-    return await getCached(cacheKey, () => fetchGeocodeResults(trimmed, limit), GEOCODE_CACHE_TTL_SECONDS);
+    return await getCached(cacheKey, () => fetchGeocodeResults(trimmed, limit, bias), GEOCODE_CACHE_TTL_SECONDS);
   } catch (error) {
     logError('Error geocoding address:', error);
     return [];

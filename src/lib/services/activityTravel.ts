@@ -23,7 +23,7 @@
  *    (the manual refresh action) bypasses this reuse.
  */
 import { and, asc, eq, gte, inArray, lt } from 'drizzle-orm';
-import { geocodeAddress } from '@/lib/integrations/geocode';
+import { geocodeAddress, type GeocodeBias } from '@/lib/integrations/geocode';
 import { getRoutingProvider } from '@/lib/integrations/routing';
 import { resolveEffectiveLocation } from '@/lib/utils/activityWorkflowTiming';
 import {
@@ -68,8 +68,17 @@ export interface ActivityTravelComputationInput {
 type ResolvedLocation = { address: string; lat: number; lon: number };
 type LocationResolution = { ok: true; location: ResolvedLocation } | { ok: false; failureReason: string };
 
-async function resolveLocationText(text: string): Promise<LocationResolution> {
-  const candidates = await geocodeAddress(text, 3);
+/**
+ * `bias`, when given, biases Nominatim's ranking toward the household's
+ * own Home coordinates (see GeocodeBias/geocodeAddress) — a real-world
+ * activity destination or departure point is overwhelmingly likely to be
+ * local or regional to Home, so this materially reduces the chance that
+ * an obscure/ambiguous business name resolves to an unrelated same-named
+ * place far away (the root cause behind OpenRouteService's own
+ * "route distance too large" rejection).
+ */
+async function resolveLocationText(text: string, bias?: GeocodeBias): Promise<LocationResolution> {
+  const candidates = await geocodeAddress(text, 3, bias);
   if (candidates.length === 0) return { ok: false, failureReason: 'geocode_failed' };
   if (isAmbiguousGeocodeMatch(candidates)) return { ok: false, failureReason: 'ambiguous_address' };
   const top = candidates[0]!;
@@ -106,8 +115,10 @@ export async function computeActivityTravel(input: ActivityTravelComputationInpu
   const departureOverrideText = input.departureLocationOverride?.trim() || null;
   if (!departureOverrideText && !input.home) return null;
 
+  const homeBias: GeocodeBias | undefined = input.home ? { lat: input.home.lat, lon: input.home.lon } : undefined;
+
   const departureResolution: LocationResolution = departureOverrideText
-    ? await resolveLocationText(departureOverrideText)
+    ? await resolveLocationText(departureOverrideText, homeBias)
     : { ok: true, location: { address: input.home!.address, lat: input.home!.lat, lon: input.home!.lon } };
 
   const destinationInputHashFallback = hashTravelText(destinationText);
@@ -118,7 +129,7 @@ export async function computeActivityTravel(input: ActivityTravelComputationInpu
   }
 
   const departureHash = hashTravelLocation(departureResolution.location);
-  const destinationResolution = await resolveLocationText(destinationText);
+  const destinationResolution = await resolveLocationText(destinationText, homeBias);
 
   if (!destinationResolution.ok) {
     return failureMeta(`destination_${destinationResolution.failureReason}`, departureHash, destinationInputHashFallback);

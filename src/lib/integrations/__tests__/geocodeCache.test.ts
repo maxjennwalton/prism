@@ -89,4 +89,33 @@ describe('geocodeAddress — caching', () => {
 
     expect(global.fetch).toHaveBeenCalledTimes(1);
   });
+
+  it('caches biased and unbiased lookups of the same text separately', async () => {
+    mockFetchOnce([NOMINATIM_RESULT]);
+    mockFetchOnce([NOMINATIM_RESULT]);
+
+    await geocodeAddress('Community Rink');
+    await geocodeAddress('Community Rink', 5, { lat: 44.5, lon: -80.2 });
+
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('caches two different households\' biased lookups of the same text separately, never cross-contaminating results', async () => {
+    mockFetchOnce([NOMINATIM_RESULT]);
+    mockFetchOnce([{ ...NOMINATIM_RESULT, place_id: 2 }]);
+
+    const householdA = await geocodeAddress('Community Rink', 5, { lat: 44.5, lon: -80.2 });
+    const householdB = await geocodeAddress('Community Rink', 5, { lat: 51.5, lon: -0.1 });
+
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(householdA[0]?.placeId).not.toBe(householdB[0]?.placeId);
+  });
+
+  it('reuses the cache for the same bias point even with tiny float noise (rounded for the cache key)', async () => {
+    mockFetchOnce([NOMINATIM_RESULT]);
+    await geocodeAddress('Community Rink', 5, { lat: 44.500001, lon: -80.200001 });
+    await geocodeAddress('Community Rink', 5, { lat: 44.5, lon: -80.2 });
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
 });

@@ -113,4 +113,31 @@ describe('geocodeAddress', () => {
     const [result] = await geocodeAddress('Yellowstone');
     expect(result).toMatchObject({ class: 'boundary', type: 'national_park' });
   });
+
+  describe('bias (soft locality preference)', () => {
+    it('adds a viewbox around the bias point with bounded=0 (soft, not hard, preference)', async () => {
+      mockFetchOnce([nominatimResult()]);
+      await geocodeAddress('123 Main St', 5, { lat: 44.5, lon: -80.2 });
+
+      const [url] = (global.fetch as jest.Mock).mock.calls[0];
+      const parsed = new URL(url);
+      expect(parsed.searchParams.get('bounded')).toBe('0');
+      const viewbox = parsed.searchParams.get('viewbox')!.split(',').map(Number);
+      const [left, top, right, bottom] = viewbox;
+      expect(left).toBeLessThan(-80.2);
+      expect(right).toBeGreaterThan(-80.2);
+      expect(bottom).toBeLessThan(44.5);
+      expect(top).toBeGreaterThan(44.5);
+    });
+
+    it('sends no viewbox/bounded params at all when no bias is given (unbiased global search, e.g. the Travel globe)', async () => {
+      mockFetchOnce([nominatimResult()]);
+      await geocodeAddress('123 Main St');
+
+      const [url] = (global.fetch as jest.Mock).mock.calls[0];
+      const parsed = new URL(url);
+      expect(parsed.searchParams.has('viewbox')).toBe(false);
+      expect(parsed.searchParams.has('bounded')).toBe(false);
+    });
+  });
 });

@@ -99,7 +99,7 @@ describe('computeActivityTravel — destination precedence (reuses resolveEffect
       profileDefaultLocation: 'Default Rink',
     }));
 
-    expect(mockGeocodeAddress).toHaveBeenCalledWith('Override Rink', 3);
+    expect(mockGeocodeAddress).toHaveBeenCalledWith('Override Rink', 3, { lat: HOME.lat, lon: HOME.lon });
   });
 });
 
@@ -143,6 +143,40 @@ describe('computeActivityTravel — geocode failures', () => {
     mockGeocodeAddress.mockResolvedValueOnce([{ importance: 0.5 }, { importance: 0.49 }]);
     const result = await computeActivityTravel(baseInput());
     expect(result?.failureReason).toBe('destination_ambiguous_address');
+  });
+});
+
+describe('computeActivityTravel — home-biased geocoding (requirement: prefer geographically appropriate matches)', () => {
+  it('passes the household\'s own Home coordinates as the geocode bias for the destination', async () => {
+    mockGeocodeAddress.mockResolvedValueOnce(geocodeOk(DESTINATION_GEO.lat, DESTINATION_GEO.lon));
+    mockGetDrivingRoute.mockResolvedValueOnce({ status: 'ok', route: { distanceMeters: 1, durationSeconds: 1 }, failureReason: null });
+
+    await computeActivityTravel(baseInput());
+
+    expect(mockGeocodeAddress).toHaveBeenCalledWith(DESTINATION_TEXT, 3, { lat: HOME.lat, lon: HOME.lon });
+  });
+
+  it('passes the same Home bias for a departure override lookup too', async () => {
+    mockGeocodeAddress
+      .mockResolvedValueOnce(geocodeOk(40.1, -75.1))
+      .mockResolvedValueOnce(geocodeOk(DESTINATION_GEO.lat, DESTINATION_GEO.lon));
+    mockGetDrivingRoute.mockResolvedValueOnce({ status: 'ok', route: { distanceMeters: 1, durationSeconds: 1 }, failureReason: null });
+
+    await computeActivityTravel(baseInput({ departureLocationOverride: 'Grandma\'s House' }));
+
+    expect(mockGeocodeAddress).toHaveBeenCalledWith('Grandma\'s House', 3, { lat: HOME.lat, lon: HOME.lon });
+  });
+
+  it('never passes a bias when there is no Home address configured (departure override only, no Home)', async () => {
+    mockGeocodeAddress
+      .mockResolvedValueOnce(geocodeOk(40.1, -75.1))
+      .mockResolvedValueOnce(geocodeOk(40.2, -75.2));
+    mockGetDrivingRoute.mockResolvedValueOnce({ status: 'ok', route: { distanceMeters: 1, durationSeconds: 1 }, failureReason: null });
+
+    await computeActivityTravel(baseInput({ home: null, departureLocationOverride: 'Grandma\'s House' }));
+
+    expect(mockGeocodeAddress).toHaveBeenCalledWith('Grandma\'s House', 3, undefined);
+    expect(mockGeocodeAddress).toHaveBeenCalledWith(DESTINATION_TEXT, 3, undefined);
   });
 });
 
