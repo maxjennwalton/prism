@@ -53,6 +53,16 @@ function mockFetchOnce(body: unknown, ok = true, status = 200) {
   (global.fetch as jest.Mock).mockResolvedValueOnce({ ok, status, json: async () => body });
 }
 
+/** Like mockFetchOnce, but also supports .text() for the non-OK diagnostic-logging path. */
+function mockFetchOnceWithText(bodyText: string, status: number) {
+  (global.fetch as jest.Mock).mockResolvedValueOnce({
+    ok: false,
+    status,
+    json: async () => { throw new Error('not json'); },
+    text: async () => bodyText,
+  });
+}
+
 beforeEach(() => {
   fakeRedisStore.clear();
   jest.clearAllMocks();
@@ -125,6 +135,43 @@ describe('createOpenRouteServiceProvider — response handling', () => {
     const outcome = await provider.getDrivingRoute(ORIGIN, DESTINATION);
     expect(outcome.route).not.toHaveProperty('traffic');
     expect(outcome.route).not.toHaveProperty('live');
+  });
+
+  it('includes ORS\'s own error body in the logged diagnostic on a non-OK status', async () => {
+    const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    mockFetchOnceWithText('{"error":{"code":2010,"message":"Could not find routable point"}}', 400);
+
+    const provider = createOpenRouteServiceProvider('key');
+    await provider.getDrivingRoute(ORIGIN, DESTINATION);
+
+    const logged = consoleSpy.mock.calls.flat().map((a) => String(a)).join(' ');
+    expect(logged).toContain('400');
+    expect(logged).toContain('Could not find routable point');
+    consoleSpy.mockRestore();
+  });
+
+  it('never throws and still returns provider_error when reading the error body itself fails', async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      json: async () => { throw new Error('not json'); },
+      text: async () => { throw new Error('body already consumed'); },
+    });
+    const provider = createOpenRouteServiceProvider('key');
+    const outcome = await provider.getDrivingRoute(ORIGIN, DESTINATION);
+    expect(outcome).toEqual({ status: 'unavailable', route: null, failureReason: 'provider_error' });
+  });
+
+  it('truncates an oversized error body rather than logging it unbounded', async () => {
+    const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    mockFetchOnceWithText('x'.repeat(5000), 400);
+
+    const provider = createOpenRouteServiceProvider('key');
+    await provider.getDrivingRoute(ORIGIN, DESTINATION);
+
+    const logged = consoleSpy.mock.calls.flat().map((a) => String(a)).join(' ');
+    expect(logged.length).toBeLessThan(1000);
+    consoleSpy.mockRestore();
   });
 });
 

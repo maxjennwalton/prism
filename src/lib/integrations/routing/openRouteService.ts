@@ -32,6 +32,13 @@ const RATE_LIMIT_SCOPE = 'system';
 const MAX_PER_MINUTE = 30;
 const MAX_PER_DAY = 1500;
 
+// Bounds how much of ORS's own error body we ever log — plenty for its
+// structured { error: { code, message } } payloads, small enough to never
+// balloon logs. ORS error bodies describe the request it received (e.g.
+// "could not find routable point"), never the Authorization header, so
+// this is safe to log in full up to the cap.
+const MAX_ERROR_BODY_CHARS = 500;
+
 interface OrsSummary {
   distance?: number;
   duration?: number;
@@ -55,6 +62,16 @@ function roundCoord(n: number): number {
   return Math.round(n * 10000) / 10000;
 }
 
+/** Best-effort read of a non-OK response's body for diagnostics; never throws. */
+async function safeReadErrorBody(response: Response): Promise<string | null> {
+  try {
+    const text = await response.text();
+    return text ? text.slice(0, MAX_ERROR_BODY_CHARS) : null;
+  } catch {
+    return null;
+  }
+}
+
 async function callOrs(origin: RoutingCoordinate, destination: RoutingCoordinate, apiKey: string): Promise<RouteOutcome> {
   try {
     const response = await withTimeout(
@@ -75,7 +92,8 @@ async function callOrs(origin: RoutingCoordinate, destination: RoutingCoordinate
     );
 
     if (!response.ok) {
-      logError('OpenRouteService returned an error status', new Error(`HTTP ${response.status}`));
+      const body = await safeReadErrorBody(response);
+      logError('OpenRouteService returned an error status', new Error(`HTTP ${response.status}${body ? `: ${body}` : ''}`));
       return { status: 'unavailable', route: null, failureReason: 'provider_error' };
     }
 

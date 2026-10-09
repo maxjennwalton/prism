@@ -6,6 +6,8 @@ import { render, screen, fireEvent, act } from '@testing-library/react';
 import { ActivityTravelPanel } from '../ActivityTravelPanel';
 
 jest.mock('@/components/ui/use-toast', () => ({ toast: jest.fn() }));
+import { toast } from '@/components/ui/use-toast';
+const mockToast = toast as jest.Mock;
 
 async function flush() {
   await act(async () => {
@@ -31,6 +33,7 @@ function item(overrides: Partial<Record<string, unknown>> = {}) {
 
 beforeEach(() => {
   global.fetch = jest.fn();
+  mockToast.mockClear();
 });
 
 describe('ActivityTravelPanel', () => {
@@ -83,7 +86,7 @@ describe('ActivityTravelPanel', () => {
   it('triggers a manual refresh via the refresh-travel endpoint', async () => {
     (global.fetch as jest.Mock)
       .mockResolvedValueOnce({ json: async () => ({ items: [item()] }) })
-      .mockResolvedValueOnce({ ok: true, json: async () => ({ travelMeta: null }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ travelMeta: { status: 'ok', minutes: 12, failureReason: null } }) })
       .mockResolvedValueOnce({ json: async () => ({ items: [item()] }) });
 
     render(<ActivityTravelPanel />);
@@ -95,5 +98,94 @@ describe('ActivityTravelPanel', () => {
     const refreshCall = (global.fetch as jest.Mock).mock.calls.find(([url]) => String(url).includes('/refresh-travel'));
     expect(refreshCall).toBeDefined();
     expect(refreshCall![0]).toBe('/api/activity-matching/links/link-1/refresh-travel');
+  });
+
+  it('shows a success toast when the refreshed travel_meta status is ok', async () => {
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce({ json: async () => ({ items: [item()] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ travelMeta: { status: 'ok', minutes: 12, failureReason: null } }) })
+      .mockResolvedValueOnce({ json: async () => ({ items: [item()] }) });
+
+    render(<ActivityTravelPanel />);
+    await flush();
+    fireEvent.click(screen.getByLabelText(/refresh travel estimate/i));
+    await flush();
+
+    expect(mockToast).toHaveBeenCalledWith(expect.objectContaining({ title: 'Travel estimate refreshed' }));
+  });
+
+  it('shows a success toast when there is nothing to compute (null travelMeta, e.g. manual override)', async () => {
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce({ json: async () => ({ items: [item()] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ travelMeta: null }) })
+      .mockResolvedValueOnce({ json: async () => ({ items: [item()] }) });
+
+    render(<ActivityTravelPanel />);
+    await flush();
+    fireEvent.click(screen.getByLabelText(/refresh travel estimate/i));
+    await flush();
+
+    expect(mockToast).toHaveBeenCalledWith(expect.objectContaining({ title: 'Travel estimate refreshed' }));
+  });
+
+  it('never shows a success toast when the recomputed travel_meta status is unavailable — surfaces the real failure instead', async () => {
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce({ json: async () => ({ items: [item()] }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ travelMeta: { status: 'unavailable', minutes: null, failureReason: 'provider_error' } }),
+      })
+      .mockResolvedValueOnce({ json: async () => ({ items: [item()] }) });
+
+    render(<ActivityTravelPanel />);
+    await flush();
+    fireEvent.click(screen.getByLabelText(/refresh travel estimate/i));
+    await flush();
+
+    expect(mockToast).not.toHaveBeenCalledWith(expect.objectContaining({ title: 'Travel estimate refreshed' }));
+    expect(mockToast).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Travel estimate unavailable',
+      variant: 'destructive',
+    }));
+  });
+
+  it('describes an ambiguous destination address in human terms, not the raw failureReason code', async () => {
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce({ json: async () => ({ items: [item()] }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ travelMeta: { status: 'unavailable', minutes: null, failureReason: 'destination_ambiguous_address' } }),
+      })
+      .mockResolvedValueOnce({ json: async () => ({ items: [item()] }) });
+
+    render(<ActivityTravelPanel />);
+    await flush();
+    fireEvent.click(screen.getByLabelText(/refresh travel estimate/i));
+    await flush();
+
+    const call = mockToast.mock.calls.find(([arg]) => arg.title === 'Travel estimate unavailable');
+    expect(call?.[0].description).toMatch(/destination address is ambiguous/i);
+    expect(call?.[0].description).not.toContain('destination_ambiguous_address');
+  });
+
+  it.each([
+    ['departure_geocode_failed', /could not find the departure address/i],
+    ['provider_timeout', /timed out/i],
+    ['rate_limited', /too many requests/i],
+    ['not_configured', /no routing provider/i],
+  ])('describes failureReason %s in human terms, never the raw code', async (failureReason, expected) => {
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce({ json: async () => ({ items: [item()] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ travelMeta: { status: 'unavailable', minutes: null, failureReason } }) })
+      .mockResolvedValueOnce({ json: async () => ({ items: [item()] }) });
+
+    render(<ActivityTravelPanel />);
+    await flush();
+    fireEvent.click(screen.getByLabelText(/refresh travel estimate/i));
+    await flush();
+
+    const call = mockToast.mock.calls.find(([arg]) => arg.title === 'Travel estimate unavailable');
+    expect(call?.[0].description).toMatch(expected);
+    expect(call?.[0].description).not.toContain(failureReason);
   });
 });

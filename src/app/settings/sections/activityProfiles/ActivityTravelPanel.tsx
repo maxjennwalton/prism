@@ -31,6 +31,32 @@ function travelLabel(minutes: number | null, source: ActivityTravelSource): stri
 }
 
 /**
+ * Human-facing explanation for a failed calculation — travel_meta's own
+ * failureReason is an internal diagnostic code (e.g. "destination_
+ * ambiguous_address", "provider_timeout") never meant to be shown to a
+ * parent verbatim (see RouteFailureReason's doc comment in routing/types.ts).
+ */
+function describeFailure(failureReason: string | null): string {
+  if (!failureReason) return 'Could not calculate a route.';
+  if (failureReason.startsWith('departure_') || failureReason.startsWith('destination_')) {
+    const side = failureReason.startsWith('departure_') ? 'departure address' : 'destination address';
+    return failureReason.endsWith('ambiguous_address')
+      ? `The ${side} is ambiguous — try adding more detail.`
+      : `Could not find the ${side}.`;
+  }
+  switch (failureReason) {
+    case 'rate_limited':
+      return 'Too many requests right now — try again in a minute.';
+    case 'provider_timeout':
+      return 'The routing service timed out.';
+    case 'not_configured':
+      return 'No routing provider is configured.';
+    default:
+      return 'The routing service could not calculate a route.';
+  }
+}
+
+/**
  * Phase 4B: the next two weeks of settled activities, each with its
  * effective travel estimate and a per-event departure override a parent
  * can set (e.g. "leaving from Grandma's" for one specific game) — saving
@@ -86,7 +112,17 @@ export function ActivityTravelPanel() {
     try {
       const res = await fetch(`/api/activity-matching/links/${item.linkId}/refresh-travel`, { method: 'POST' });
       if (!res.ok) throw new Error('Failed to refresh travel estimate');
-      toast({ title: 'Travel estimate refreshed' });
+      const data = await res.json();
+      const travelMeta = data.travelMeta as { status: 'ok' | 'unavailable'; failureReason: string | null } | null;
+
+      // The request itself succeeding (HTTP 200) is not the same as the
+      // route calculation succeeding — travelMeta.status carries the real
+      // outcome, and a failed attempt must never read as a success toast.
+      if (travelMeta?.status === 'unavailable') {
+        toast({ title: 'Travel estimate unavailable', description: describeFailure(travelMeta.failureReason), variant: 'destructive' });
+      } else {
+        toast({ title: 'Travel estimate refreshed' });
+      }
       await load();
     } catch (err) {
       toast({ title: err instanceof Error ? err.message : 'Failed to refresh travel estimate', variant: 'destructive' });
