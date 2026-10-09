@@ -29,8 +29,10 @@ import { resolveEffectiveLocation } from '@/lib/utils/activityWorkflowTiming';
 import {
   hashTravelLocation,
   hashTravelText,
+  haversineDistanceMeters,
   isAmbiguousGeocodeMatch,
   resolveEffectiveTravel,
+  MAX_PLAUSIBLE_ACTIVITY_DISTANCE_METERS,
   type ActivityTravelSource,
 } from '@/lib/utils/activityTravelResolution';
 import { db, type DbExecutor } from '@/lib/db/client';
@@ -134,6 +136,17 @@ export async function computeActivityTravel(input: ActivityTravelComputationInpu
 
   if (isFresh && !input.forceRefresh) {
     return existing;
+  }
+
+  // Sanity gate before ever spending a provider call: a resolved pair
+  // this far apart for a local/regional activity means one side's
+  // geocode almost certainly landed on the wrong place (see haversine
+  // doc comment) — this is what previously surfaced only as an opaque
+  // OpenRouteService HTTP 400 (its own 6,000,000 m hard limit) after the
+  // request had already been sent.
+  const approxDistanceMeters = haversineDistanceMeters(departureResolution.location, destinationResolution.location);
+  if (approxDistanceMeters > MAX_PLAUSIBLE_ACTIVITY_DISTANCE_METERS) {
+    return failureMeta('implausible_distance', departureHash, destinationHash);
   }
 
   const provider = getRoutingProvider();

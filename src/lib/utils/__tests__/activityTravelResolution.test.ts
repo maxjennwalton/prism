@@ -3,8 +3,10 @@ import {
   resolveEffectiveDeparture,
   hashTravelLocation,
   hashTravelText,
+  haversineDistanceMeters,
   isAmbiguousGeocodeMatch,
   travelSourceLabel,
+  MAX_PLAUSIBLE_ACTIVITY_DISTANCE_METERS,
   type ActivityTravelCalculation,
 } from '../activityTravelResolution';
 
@@ -246,5 +248,58 @@ describe('isAmbiguousGeocodeMatch — safe-to-auto-route heuristic', () => {
   it('does not depend on input order', () => {
     const unordered = [{ importance: 0.2 }, { importance: 0.8 }, { importance: 0.4 }];
     expect(isAmbiguousGeocodeMatch(unordered)).toBe(false);
+  });
+});
+
+describe('haversineDistanceMeters — great-circle distance sanity gate', () => {
+  it('is 0 for the same point', () => {
+    expect(haversineDistanceMeters({ lat: 43.6, lon: -79.4 }, { lat: 43.6, lon: -79.4 })).toBe(0);
+  });
+
+  it('is symmetric — order of the two points never matters', () => {
+    const a = { lat: 43.6, lon: -79.4 };
+    const b = { lat: 40.7, lon: -74.0 };
+    expect(haversineDistanceMeters(a, b)).toBeCloseTo(haversineDistanceMeters(b, a), 6);
+  });
+
+  it('matches the exact closed-form quarter-circumference distance, pole to equator (latitude axis)', () => {
+    const quarterCircumference = (6_371_000 * Math.PI) / 2;
+    const distance = haversineDistanceMeters({ lat: 90, lon: 0 }, { lat: 0, lon: 0 });
+    expect(distance).toBeCloseTo(quarterCircumference, 0);
+  });
+
+  it('matches the exact closed-form quarter-circumference distance along the equator (longitude axis) — confirms lon is not swapped with lat', () => {
+    const quarterCircumference = (6_371_000 * Math.PI) / 2;
+    const distance = haversineDistanceMeters({ lat: 0, lon: 0 }, { lat: 0, lon: 90 });
+    expect(distance).toBeCloseTo(quarterCircumference, 0);
+  });
+
+  it('matches the exact closed-form half-circumference (antipodal poles)', () => {
+    const halfCircumference = 6_371_000 * Math.PI;
+    const distance = haversineDistanceMeters({ lat: 90, lon: 0 }, { lat: -90, lon: 0 });
+    expect(distance).toBeCloseTo(halfCircumference, 0);
+  });
+
+  it('returns a small, locally-plausible distance for two nearby points (~0.001 degree apart)', () => {
+    const distance = haversineDistanceMeters({ lat: 43.0, lon: -79.0 }, { lat: 43.001, lon: -79.0 });
+    expect(distance).toBeGreaterThan(100);
+    expect(distance).toBeLessThan(120);
+  });
+
+  it('a plausible local activity distance never trips MAX_PLAUSIBLE_ACTIVITY_DISTANCE_METERS', () => {
+    const distance = haversineDistanceMeters({ lat: 44.5, lon: -80.2 }, { lat: 44.6, lon: -80.1 });
+    expect(distance).toBeLessThan(MAX_PLAUSIBLE_ACTIVITY_DISTANCE_METERS);
+  });
+
+  it('a cross-continental mismatch far exceeds MAX_PLAUSIBLE_ACTIVITY_DISTANCE_METERS, and stays safely under OpenRouteService\'s own 6,000,000 m limit for the gate to fire first', () => {
+    const distance = haversineDistanceMeters({ lat: 44.5, lon: -80.2 }, { lat: 51.5, lon: -0.1 }); // ~5,700 km, Ontario to London
+    expect(distance).toBeGreaterThan(MAX_PLAUSIBLE_ACTIVITY_DISTANCE_METERS);
+  });
+});
+
+describe('MAX_PLAUSIBLE_ACTIVITY_DISTANCE_METERS', () => {
+  it('is a positive bound comfortably under OpenRouteService\'s own 6,000,000 m hard limit', () => {
+    expect(MAX_PLAUSIBLE_ACTIVITY_DISTANCE_METERS).toBeGreaterThan(0);
+    expect(MAX_PLAUSIBLE_ACTIVITY_DISTANCE_METERS).toBeLessThan(6_000_000);
   });
 });

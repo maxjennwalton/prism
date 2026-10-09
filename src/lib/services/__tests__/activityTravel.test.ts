@@ -90,7 +90,7 @@ describe('computeActivityTravel — departure precedence', () => {
 
 describe('computeActivityTravel — destination precedence (reuses resolveEffectiveLocation)', () => {
   it('prefers locationOverride over the calendar event location and profile default', async () => {
-    mockGeocodeAddress.mockResolvedValueOnce(geocodeOk(1, 1));
+    mockGeocodeAddress.mockResolvedValueOnce(geocodeOk(40.5, -75.5)); // plausibly close to HOME (40, -75)
     mockGetDrivingRoute.mockResolvedValueOnce({ status: 'ok', route: { distanceMeters: 1, durationSeconds: 1 }, failureReason: null });
 
     await computeActivityTravel(baseInput({
@@ -180,6 +180,50 @@ describe('computeActivityTravel — provider outcomes', () => {
   });
 });
 
+describe('computeActivityTravel — implausible-distance sanity gate', () => {
+  it('rejects a resolved pair too far apart to be a real local activity, without ever calling the routing provider', async () => {
+    // Home at (40, -75); destination geocoded to London, UK — several
+    // thousand km away. This is exactly the failure mode that previously
+    // only surfaced as an opaque OpenRouteService HTTP 400 (its own
+    // 6,000,000 m hard limit) after wasting a provider call.
+    mockGeocodeAddress.mockResolvedValueOnce(geocodeOk(51.5, -0.1));
+
+    const result = await computeActivityTravel(baseInput());
+
+    expect(result).toMatchObject({ status: 'unavailable', minutes: null, provider: 'none', failureReason: 'implausible_distance' });
+    expect(mockGetDrivingRoute).not.toHaveBeenCalled();
+  });
+
+  it('still proceeds to call the routing provider for a plausible local distance (regression guard)', async () => {
+    mockGeocodeAddress.mockResolvedValueOnce(geocodeOk(DESTINATION_GEO.lat, DESTINATION_GEO.lon)); // ~140km from HOME
+    mockGetDrivingRoute.mockResolvedValueOnce({ status: 'ok', route: { distanceMeters: 1000, durationSeconds: 60 }, failureReason: null });
+
+    const result = await computeActivityTravel(baseInput());
+
+    expect(mockGetDrivingRoute).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ status: 'ok' });
+  });
+
+  it('catches an implausible distance on the departure-override side just as readily as the destination side', async () => {
+    mockGeocodeAddress
+      .mockResolvedValueOnce(geocodeOk(51.5, -0.1)) // departure override geocodes to London
+      .mockResolvedValueOnce(geocodeOk(DESTINATION_GEO.lat, DESTINATION_GEO.lon)); // destination is normal/local
+
+    const result = await computeActivityTravel(baseInput({ departureLocationOverride: 'Some Other Place' }));
+
+    expect(result).toMatchObject({ status: 'unavailable', failureReason: 'implausible_distance' });
+    expect(mockGetDrivingRoute).not.toHaveBeenCalled();
+  });
+
+  it('carries real departure/destination input hashes on an implausible-distance failure, not placeholder values', async () => {
+    mockGeocodeAddress.mockResolvedValueOnce(geocodeOk(51.5, -0.1));
+    const result = await computeActivityTravel(baseInput());
+    expect(result?.departureInputHash).toEqual(expect.any(String));
+    expect(result?.destinationInputHash).toEqual(expect.any(String));
+    expect(result?.departureInputHash).not.toBe(result?.destinationInputHash);
+  });
+});
+
 describe('computeActivityTravel — staleness / cache reuse', () => {
   function freshExisting(): ActivityTravelMeta {
     return {
@@ -204,7 +248,7 @@ describe('computeActivityTravel — staleness / cache reuse', () => {
   });
 
   it('recomputes when the existing result is stale (input hashes no longer match, e.g. destination changed)', async () => {
-    mockGeocodeAddress.mockResolvedValueOnce(geocodeOk(99, 99)); // destination now resolves somewhere new
+    mockGeocodeAddress.mockResolvedValueOnce(geocodeOk(40.2, -75.2)); // destination now resolves somewhere new, but still plausibly close to HOME
     mockGetDrivingRoute.mockResolvedValueOnce({ status: 'ok', route: { distanceMeters: 1, durationSeconds: 1 }, failureReason: null });
 
     const existing = freshExisting(); // hashed against the OLD destination coordinates

@@ -151,6 +151,51 @@ export function hashTravelText(text: string): string {
   return createHash('sha256').update(text.trim().toLowerCase()).digest('hex');
 }
 
+export interface GeoPoint {
+  lat: number;
+  lon: number;
+}
+
+const EARTH_RADIUS_METERS = 6_371_000;
+
+function toRadians(degrees: number): number {
+  return (degrees * Math.PI) / 180;
+}
+
+/**
+ * Great-circle distance between two points, in meters. Used as a sanity
+ * gate before ever calling a routing provider — a resolved departure/
+ * destination pair whose straight-line distance is already implausible
+ * for a local activity means one side's geocode almost certainly resolved
+ * to the wrong place, and no routing provider call should be spent
+ * confirming that (OpenRouteService's own distance limit — 6,000,000 m —
+ * is what actually surfaces this today, as an HTTP 400 after the request
+ * has already been wasted).
+ */
+export function haversineDistanceMeters(a: GeoPoint, b: GeoPoint): number {
+  const dLat = toRadians(b.lat - a.lat);
+  const dLon = toRadians(b.lon - a.lon);
+  const lat1 = toRadians(a.lat);
+  const lat2 = toRadians(b.lat);
+
+  const sinDLat = Math.sin(dLat / 2);
+  const sinDLon = Math.sin(dLon / 2);
+  const h = sinDLat * sinDLat + Math.cos(lat1) * Math.cos(lat2) * sinDLon * sinDLon;
+  const c = 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+
+  return EARTH_RADIUS_METERS * c;
+}
+
+/**
+ * Generous upper bound for a single local/regional activity's one-way
+ * drive — well under OpenRouteService's own 6,000,000 m hard limit, so
+ * this gate always fires first and produces a specific, actionable
+ * failureReason instead of a opaque provider HTTP error. Not tied to any
+ * specific region or household; it's a plausibility bound on "a kid's
+ * activity," not a geographic boundary.
+ */
+export const MAX_PLAUSIBLE_ACTIVITY_DISTANCE_METERS = 300_000;
+
 export interface GeocodeCandidate {
   importance: number;
 }
