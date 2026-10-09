@@ -36,7 +36,14 @@ import {
   type ActivityTravelSource,
 } from '@/lib/utils/activityTravelResolution';
 import { db, type DbExecutor } from '@/lib/db/client';
-import { activityEventLinks, activityProfiles, events, users, type ActivityTravelMeta } from '@/lib/db/schema';
+import {
+  activityEventLinks,
+  activityProfiles,
+  events,
+  users,
+  type ActivityDestinationOverride,
+  type ActivityTravelMeta,
+} from '@/lib/db/schema';
 import { getHomeAddress } from '@/lib/services/homeAddress';
 
 const REFRESH_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -59,6 +66,13 @@ export interface ActivityTravelComputationInput {
   locationOverride: string | null;
   eventLocation: string | null;
   profileDefaultLocation: string | null;
+  /**
+   * A parent-confirmed destination pin (exact coordinates, never free
+   * text) — when present, used directly instead of re-geocoding
+   * destinationText, so a correction is immune to any future drift in
+   * Nominatim's own index for the same address.
+   */
+  destinationOverrideCoords: ActivityDestinationOverride | null;
   home: HomeAddressInput | null;
   existingTravelMeta: ActivityTravelMeta | null;
   /** Bypasses the "reuse a still-fresh result" shortcut — used by the manual refresh action. */
@@ -121,7 +135,9 @@ export async function computeActivityTravel(input: ActivityTravelComputationInpu
     ? await resolveLocationText(departureOverrideText, homeBias)
     : { ok: true, location: { address: input.home!.address, lat: input.home!.lat, lon: input.home!.lon } };
 
-  const destinationInputHashFallback = hashTravelText(destinationText);
+  const destinationInputHashFallback = input.destinationOverrideCoords
+    ? hashTravelLocation(input.destinationOverrideCoords)
+    : hashTravelText(destinationText);
 
   if (!departureResolution.ok) {
     const departureInputHash = hashTravelText(departureOverrideText ?? input.home!.address);
@@ -129,7 +145,9 @@ export async function computeActivityTravel(input: ActivityTravelComputationInpu
   }
 
   const departureHash = hashTravelLocation(departureResolution.location);
-  const destinationResolution = await resolveLocationText(destinationText, homeBias);
+  const destinationResolution: LocationResolution = input.destinationOverrideCoords
+    ? { ok: true, location: { ...input.destinationOverrideCoords } }
+    : await resolveLocationText(destinationText, homeBias);
 
   if (!destinationResolution.ok) {
     return failureMeta(`destination_${destinationResolution.failureReason}`, departureHash, destinationInputHashFallback);
@@ -198,6 +216,7 @@ interface TravelCandidateRow {
   departureLocationOverride: string | null;
   travelMinutesOverride: number | null;
   locationOverride: string | null;
+  destinationOverrideCoords: ActivityDestinationOverride | null;
   travelMeta: ActivityTravelMeta | null;
   eventLocation: string | null;
   profileDefaultLocation: string | null;
@@ -214,6 +233,7 @@ async function loadTravelCandidates(
       departureLocationOverride: activityEventLinks.departureLocationOverride,
       travelMinutesOverride: activityEventLinks.travelMinutesOverride,
       locationOverride: activityEventLinks.locationOverride,
+      destinationOverrideCoords: activityEventLinks.destinationOverrideCoords,
       travelMeta: activityEventLinks.travelMeta,
       eventLocation: events.location,
       profileDefaultLocation: activityProfiles.defaultLocation,
@@ -266,6 +286,7 @@ export async function recomputeActivityTravelForUpcoming(
       locationOverride: row.locationOverride,
       eventLocation: row.eventLocation,
       profileDefaultLocation: row.profileDefaultLocation,
+      destinationOverrideCoords: row.destinationOverrideCoords,
       home,
       existingTravelMeta: row.travelMeta,
     });
@@ -314,6 +335,7 @@ export async function recomputeActivityTravelForLink(
       departureLocationOverride: activityEventLinks.departureLocationOverride,
       travelMinutesOverride: activityEventLinks.travelMinutesOverride,
       locationOverride: activityEventLinks.locationOverride,
+      destinationOverrideCoords: activityEventLinks.destinationOverrideCoords,
       travelMeta: activityEventLinks.travelMeta,
       eventLocation: events.location,
       profileDefaultLocation: activityProfiles.defaultLocation,
@@ -332,6 +354,7 @@ export async function recomputeActivityTravelForLink(
     locationOverride: row.locationOverride,
     eventLocation: row.eventLocation,
     profileDefaultLocation: row.profileDefaultLocation ?? null,
+    destinationOverrideCoords: row.destinationOverrideCoords,
     home,
     existingTravelMeta: row.travelMeta,
     forceRefresh: true,
@@ -357,6 +380,8 @@ export interface ActivityTravelListItem {
   destination: string | null;
   /** Raw per-event departure override, if any — null means "depart from Home". */
   departureLocationOverride: string | null;
+  /** A parent-confirmed destination pin, if any — null means destination is resolved from free text each time. */
+  destinationOverrideCoords: ActivityDestinationOverride | null;
   travelMinutesOverride: number | null;
   travelMeta: ActivityTravelMeta | null;
   travelSource: ActivityTravelSource;
@@ -382,6 +407,7 @@ export async function listUpcomingActivityTravel(
       departureLocationOverride: activityEventLinks.departureLocationOverride,
       travelMinutesOverride: activityEventLinks.travelMinutesOverride,
       locationOverride: activityEventLinks.locationOverride,
+      destinationOverrideCoords: activityEventLinks.destinationOverrideCoords,
       travelMeta: activityEventLinks.travelMeta,
       eventId: events.id,
       eventTitle: events.title,
@@ -422,6 +448,7 @@ export async function listUpcomingActivityTravel(
       memberName: r.memberName,
       destination,
       departureLocationOverride: r.departureLocationOverride,
+      destinationOverrideCoords: r.destinationOverrideCoords,
       travelMinutesOverride: r.travelMinutesOverride,
       travelMeta: r.travelMeta,
       travelSource: travel.source,
@@ -447,5 +474,37 @@ export async function setActivityDepartureOverride(
   await executor
     .update(activityEventLinks)
     .set({ departureLocationOverride, updatedAt: new Date() })
+    .where(eq(activityEventLinks.id, linkId));
+}
+
+/**
+ * Sets (or clears, with null) a parent-confirmed destination pin for one
+ * activity link. `destination` must be an exact candidate the parent
+ * picked from geocode search results (never free text this function
+ * would geocode itself — same "never guess" rule as Home address and the
+ * departure override) — requirement 6 ("select and save the correct
+ * destination from geocoding suggestions"). Writes locationOverride to
+ * the same address text in the same update so the two never drift apart:
+ * display text (locationOverride, via the existing resolveEffectiveLocation
+ * precedence) and the routing-authoritative coordinates
+ * (destinationOverrideCoords, via computeActivityTravel) always agree.
+ *
+ * Calendar sync never touches activity_event_links at all (see
+ * createActivityEventLinkIfAbsent/updateActivityEventLink), so this
+ * correction is permanent until a parent explicitly changes or clears
+ * it — requirement 7.
+ */
+export async function setActivityDestinationOverride(
+  linkId: string,
+  destination: ActivityDestinationOverride | null,
+  executor: DbExecutor = db,
+): Promise<void> {
+  await executor
+    .update(activityEventLinks)
+    .set({
+      locationOverride: destination?.address ?? null,
+      destinationOverrideCoords: destination,
+      updatedAt: new Date(),
+    })
     .where(eq(activityEventLinks.id, linkId));
 }

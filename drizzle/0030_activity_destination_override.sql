@@ -1,0 +1,21 @@
+-- 0030_activity_destination_override.sql
+--
+-- Sports & Activity Assistant — Phase 4B: geocoding/routing accuracy.
+--
+-- Adds one nullable column to the existing activity_event_links table.
+-- NULL means "no parent-confirmed destination pin" — destination
+-- resolution falls back to its existing locationOverride -> event.location
+-- -> profile.defaultLocation precedence, re-geocoded as free text.
+--
+-- destination_override_coords carries the exact coordinates a parent
+-- explicitly picked from geocode search candidates for one activity (see
+-- POST /api/activity-matching/links/[id]/destination) — never free text
+-- to be re-geocoded. Set together with location_override (same address
+-- text, for display) at save time. Once set, it is the authoritative
+-- source for routing: computeActivityTravel uses it directly rather than
+-- re-geocoding text, so a parent's correction survives both a future
+-- calendar re-sync (which never touches activity_event_links at all —
+-- see createActivityEventLinkIfAbsent) and any future drift in
+-- Nominatim's own index for the same address text.
+
+ALTER TABLE activity_event_links ADD COLUMN IF NOT EXISTS destination_override_coords jsonb;

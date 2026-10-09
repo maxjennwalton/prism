@@ -28,6 +28,7 @@ function baseInput(overrides: Partial<ActivityTravelComputationInput> = {}): Act
     locationOverride: null,
     eventLocation: DESTINATION_TEXT,
     profileDefaultLocation: null,
+    destinationOverrideCoords: null,
     home: HOME,
     existingTravelMeta: null,
     ...overrides,
@@ -100,6 +101,44 @@ describe('computeActivityTravel — destination precedence (reuses resolveEffect
     }));
 
     expect(mockGeocodeAddress).toHaveBeenCalledWith('Override Rink', 3, { lat: HOME.lat, lon: HOME.lon });
+  });
+
+  it('uses a parent-confirmed destinationOverrideCoords pin directly, never re-geocoding the destination text', async () => {
+    mockGetDrivingRoute.mockResolvedValueOnce({ status: 'ok', route: { distanceMeters: 2000, durationSeconds: 180 }, failureReason: null });
+
+    const pin = { address: 'All Around Athletics Centre, 91 Sandford Fleming Dr', lat: 40.1, lon: -75.1 };
+    const result = await computeActivityTravel(baseInput({ locationOverride: pin.address, destinationOverrideCoords: pin }));
+
+    expect(mockGeocodeAddress).not.toHaveBeenCalled();
+    const [, destinationArg] = mockGetDrivingRoute.mock.calls[0];
+    expect(destinationArg).toEqual({ lat: pin.lat, lon: pin.lon });
+    expect(result).toMatchObject({ status: 'ok' });
+  });
+
+  it('a pinned destination can never be flagged ambiguous or geocode-failed — those checks only ever apply to free text', async () => {
+    mockGetDrivingRoute.mockResolvedValueOnce({ status: 'ok', route: { distanceMeters: 1, durationSeconds: 1 }, failureReason: null });
+    const pin = { address: 'Pinned Place', lat: 40.1, lon: -75.1 };
+
+    const result = await computeActivityTravel(baseInput({ locationOverride: pin.address, destinationOverrideCoords: pin }));
+
+    expect(result?.failureReason).toBeNull();
+  });
+
+  it('still applies the implausible-distance gate to a pinned destination (pins are not exempt from sanity checks)', async () => {
+    const pin = { address: 'Somewhere Far', lat: 51.5, lon: -0.1 };
+    const result = await computeActivityTravel(baseInput({ locationOverride: pin.address, destinationOverrideCoords: pin }));
+
+    expect(result).toMatchObject({ status: 'unavailable', failureReason: 'implausible_distance' });
+    expect(mockGetDrivingRoute).not.toHaveBeenCalled();
+  });
+
+  it('hashes the pinned destination\'s coordinates (not re-derived from geocoding) for staleness detection', async () => {
+    mockGetDrivingRoute.mockResolvedValueOnce({ status: 'ok', route: { distanceMeters: 1, durationSeconds: 1 }, failureReason: null });
+    const pin = { address: 'Pinned Place', lat: 40.1, lon: -75.1 };
+
+    const result = await computeActivityTravel(baseInput({ locationOverride: pin.address, destinationOverrideCoords: pin }));
+
+    expect(result?.destinationInputHash).toBe(hashTravelLocation(pin));
   });
 });
 

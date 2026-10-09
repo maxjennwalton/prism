@@ -2707,6 +2707,9 @@ CREATE TABLE IF NOT EXISTS public.activity_event_links (
   location_override text,
   -- Phase 4B (see drizzle/0029_activity_travel.sql): NULL = depart from Home.
   departure_location_override text,
+  -- Phase 4B (see drizzle/0030_activity_destination_override.sql): NULL = no
+  -- parent-confirmed destination pin; falls back to location_override text.
+  destination_override_coords jsonb,
   auto_matched boolean DEFAULT true NOT NULL,
   -- Phase 3 (see drizzle/0028_activity_matching.sql): NULL = predates matching.
   match_status varchar(20),

@@ -1976,6 +1976,24 @@ export interface ActivityTravelMeta {
   failureReason: string | null;
 }
 
+/**
+ * A parent-confirmed destination for one activity_event_links row —
+ * exact coordinates the parent explicitly picked from geocode candidates
+ * (see /api/activity-matching/links/[id]/destination), not free text to
+ * be re-geocoded. Pairs with `locationOverride` (set to the same address
+ * text at save time, for display) but is the authoritative source for
+ * routing: once set, computeActivityTravel uses these coordinates
+ * directly and never re-geocodes the text, so the correction survives
+ * both a future calendar re-sync (which never touches this column — see
+ * createActivityEventLinkIfAbsent) and any future drift in Nominatim's
+ * own index for the same text.
+ */
+export interface ActivityDestinationOverride {
+  address: string;
+  lat: number;
+  lon: number;
+}
+
 export const activityProfiles = pgTable('activity_profiles', {
   id: uuid('id').defaultRandom().primaryKey(),
 
@@ -2092,6 +2110,13 @@ export const activityEventLinks = pgTable('activity_event_links', {
   // Saving this never touches the Home setting itself (it's a per-event
   // override, not an edit to the default).
   departureLocationOverride: text('departure_location_override'),
+
+  // Phase 4B (geocoding/routing accuracy). NULL = no parent-confirmed
+  // destination pin; destination resolution falls back to locationOverride
+  // -> event.location -> profile.defaultLocation, re-geocoded as free
+  // text each time. Set together with locationOverride (same address
+  // text) by the destination-correction UI — see ActivityDestinationOverride.
+  destinationOverrideCoords: jsonb('destination_override_coords').$type<ActivityDestinationOverride | null>(),
 
   // true until a human edits anything on this row; a future matcher should
   // then leave it alone on later syncs.

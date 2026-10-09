@@ -26,6 +26,7 @@ jest.mock('@/lib/db/schema', () => ({
     departureLocationOverride: 'activityEventLinks.departureLocationOverride',
     travelMinutesOverride: 'activityEventLinks.travelMinutesOverride',
     locationOverride: 'activityEventLinks.locationOverride',
+    destinationOverrideCoords: 'activityEventLinks.destinationOverrideCoords',
     travelMeta: 'activityEventLinks.travelMeta',
   },
   events: { id: 'events.id', title: 'events.title', location: 'events.location', startTime: 'events.startTime' },
@@ -58,6 +59,7 @@ import {
   recomputeActivityTravelForLink,
   listUpcomingActivityTravel,
   setActivityDepartureOverride,
+  setActivityDestinationOverride,
 } from '../activityTravel';
 
 const HOME = { address: '1 Home Way', lat: 40, lon: -75 };
@@ -102,6 +104,7 @@ function listRow(overrides: Record<string, unknown> = {}) {
     departureLocationOverride: null,
     travelMinutesOverride: null,
     locationOverride: null,
+    destinationOverrideCoords: null,
     travelMeta: null,
     eventId: 'event-1',
     eventTitle: 'Hockey Practice',
@@ -120,6 +123,7 @@ function baseRow(overrides: Record<string, unknown> = {}) {
     departureLocationOverride: null,
     travelMinutesOverride: null,
     locationOverride: null,
+    destinationOverrideCoords: null,
     travelMeta: null,
     eventLocation: 'Rink B',
     profileDefaultLocation: null,
@@ -151,6 +155,19 @@ describe('recomputeActivityTravelForUpcoming', () => {
     expect(summary).toEqual({ scanned: 1, calculated: 1, reused: 0, skipped: 0, failed: 0 });
     expect(set).toHaveBeenCalledWith(expect.objectContaining({ travelMeta: expect.objectContaining({ status: 'ok', minutes: 10 }) }));
     expect(where).toHaveBeenCalled();
+  });
+
+  it('uses a pinned destinationOverrideCoords directly, skipping destination geocoding entirely', async () => {
+    const pin = { address: 'All Around Athletics Centre', lat: 40.1, lon: -75.1 };
+    mockSelectChain([baseRow({ locationOverride: pin.address, destinationOverrideCoords: pin })]);
+    const { set } = mockUpdateChain();
+    mockGetDrivingRoute.mockResolvedValueOnce({ status: 'ok', route: { distanceMeters: 2000, durationSeconds: 120 }, failureReason: null });
+
+    const summary = await recomputeActivityTravelForUpcoming();
+
+    expect(mockGeocodeAddress).not.toHaveBeenCalled();
+    expect(summary).toEqual({ scanned: 1, calculated: 1, reused: 0, skipped: 0, failed: 0 });
+    expect(set).toHaveBeenCalledWith(expect.objectContaining({ travelMeta: expect.objectContaining({ status: 'ok' }) }));
   });
 
   it('skips a row with a manual travelMinutesOverride — no DB write, no provider call', async () => {
@@ -283,6 +300,13 @@ describe('listUpcomingActivityTravel', () => {
     const [item] = await listUpcomingActivityTravel();
     expect(item?.destination).toBe('Override Rink');
   });
+
+  it('surfaces a parent-confirmed destinationOverrideCoords pin for the UI to show as pinned', async () => {
+    const pin = { address: 'All Around Athletics Centre', lat: 40.1, lon: -75.1 };
+    mockListSelectChain([listRow({ locationOverride: pin.address, destinationOverrideCoords: pin })]);
+    const [item] = await listUpcomingActivityTravel();
+    expect(item?.destinationOverrideCoords).toEqual(pin);
+  });
 });
 
 describe('setActivityDepartureOverride', () => {
@@ -298,5 +322,24 @@ describe('setActivityDepartureOverride', () => {
     const { set } = mockUpdateChain();
     await setActivityDepartureOverride('link-1', null);
     expect(set).toHaveBeenCalledWith(expect.objectContaining({ departureLocationOverride: null }));
+  });
+});
+
+describe('setActivityDestinationOverride', () => {
+  it('writes both destinationOverrideCoords and locationOverride (the same address text) in one update, and never touches the Home setting', async () => {
+    const { set, where } = mockUpdateChain();
+    const pin = { address: 'All Around Athletics Centre, 91 Sandford Fleming Dr', lat: 40.1, lon: -75.1 };
+
+    await setActivityDestinationOverride('link-1', pin);
+
+    expect(set).toHaveBeenCalledWith(expect.objectContaining({ destinationOverrideCoords: pin, locationOverride: pin.address }));
+    expect(where).toHaveBeenCalled();
+    expect(mockGetHomeAddress).not.toHaveBeenCalled();
+  });
+
+  it('clears both destinationOverrideCoords and locationOverride when passed null', async () => {
+    const { set } = mockUpdateChain();
+    await setActivityDestinationOverride('link-1', null);
+    expect(set).toHaveBeenCalledWith(expect.objectContaining({ destinationOverrideCoords: null, locationOverride: null }));
   });
 });
