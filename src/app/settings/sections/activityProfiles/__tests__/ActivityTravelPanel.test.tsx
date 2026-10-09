@@ -24,6 +24,7 @@ function item(overrides: Partial<Record<string, unknown>> = {}) {
     memberName: 'Beckham',
     destination: 'Community Rink',
     departureLocationOverride: null,
+    destinationOverrideCoords: null,
     travelMinutesOverride: null,
     travelSource: 'profile_fallback',
     travelMinutes: 20,
@@ -187,5 +188,102 @@ describe('ActivityTravelPanel', () => {
     const call = mockToast.mock.calls.find(([arg]) => arg.title === 'Travel estimate unavailable');
     expect(call?.[0].description).toMatch(expected);
     expect(call?.[0].description).not.toContain(failureReason);
+  });
+
+  it('describes failureReason implausible_distance in human terms — the exact HTTP 400 "route distance too large" case', async () => {
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce({ json: async () => ({ items: [item()] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ travelMeta: { status: 'unavailable', minutes: null, failureReason: 'implausible_distance' } }) })
+      .mockResolvedValueOnce({ json: async () => ({ items: [item()] }) });
+
+    render(<ActivityTravelPanel />);
+    await flush();
+    fireEvent.click(screen.getByLabelText(/refresh travel estimate/i));
+    await flush();
+
+    const call = mockToast.mock.calls.find((c) => c[0].title === 'Travel estimate unavailable');
+    expect(call?.[0].description).toMatch(/too far away/i);
+    expect(call?.[0].description).not.toContain('implausible_distance');
+  });
+});
+
+describe('ActivityTravelPanel — destination correction (requirement 6: select and save a destination from geocode suggestions)', () => {
+  beforeEach(() => {
+    jest.useFakeTimers({ legacyFakeTimers: false });
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  it('shows a search box for the destination when no pin is set', async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ json: async () => ({ items: [item()] }) });
+    render(<ActivityTravelPanel />);
+    await flush();
+    expect(screen.getByPlaceholderText(/fix destination/i)).not.toBeNull();
+  });
+
+  it('shows the pinned address with a clear control when a destination pin is set, not the search box', async () => {
+    const pin = { address: 'All Around Athletics Centre, 91 Sandford Fleming Dr', lat: 40.1, lon: -75.1 };
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ json: async () => ({ items: [item({ destinationOverrideCoords: pin })] }) });
+    render(<ActivityTravelPanel />);
+    await flush();
+    expect(screen.getByText(pin.address)).not.toBeNull();
+    expect(screen.queryByPlaceholderText(/fix destination/i)).toBeNull();
+    expect(screen.getByLabelText(/clear pinned destination/i)).not.toBeNull();
+  });
+
+  it('searches via /api/travel/geocode and saves exactly the selected candidate to the destination endpoint', async () => {
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce({ json: async () => ({ items: [item()] }) }) // initial load
+      .mockResolvedValueOnce({
+        json: async () => ({
+          results: [{ placeId: 1, displayName: 'All Around', fullName: 'All Around Athletics Centre, 91 Sandford Fleming Dr', latitude: 40.1, longitude: -75.1 }],
+        }),
+      }); // geocode search
+
+    render(<ActivityTravelPanel />);
+    await flush();
+
+    fireEvent.change(screen.getByPlaceholderText(/fix destination/i), { target: { value: 'All Around' } });
+    await act(async () => { jest.advanceTimersByTime(400); });
+    await flush();
+
+    expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('/api/travel/geocode?q='));
+
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ destination: { address: 'x', lat: 40.1, lon: -75.1 }, travelMeta: null }) })
+      .mockResolvedValueOnce({ json: async () => ({ items: [item()] }) }); // reload after save
+
+    fireEvent.click(screen.getByText('All Around Athletics Centre, 91 Sandford Fleming Dr'));
+    await flush();
+
+    const saveCall = (global.fetch as jest.Mock).mock.calls.find(([url]) => String(url) === '/api/activity-matching/links/link-1/destination');
+    expect(saveCall).toBeDefined();
+    const [, init] = saveCall!;
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body)).toEqual({
+      destination: { address: 'All Around Athletics Centre, 91 Sandford Fleming Dr', lat: 40.1, lon: -75.1 },
+    });
+  });
+
+  it('clears the pin via the destination endpoint with destination: null, never touching the Home address endpoint', async () => {
+    const pin = { address: 'Pinned Place', lat: 40.1, lon: -75.1 };
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce({ json: async () => ({ items: [item({ destinationOverrideCoords: pin })] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ destination: null, travelMeta: null }) })
+      .mockResolvedValueOnce({ json: async () => ({ items: [item()] }) });
+
+    render(<ActivityTravelPanel />);
+    await flush();
+
+    fireEvent.click(screen.getByLabelText(/clear pinned destination/i));
+    await flush();
+
+    const clearCall = (global.fetch as jest.Mock).mock.calls.find(([url]) => String(url) === '/api/activity-matching/links/link-1/destination');
+    expect(clearCall).toBeDefined();
+    const [, init] = clearCall!;
+    expect(JSON.parse(init.body)).toEqual({ destination: null });
+    expect((global.fetch as jest.Mock).mock.calls.some(([u]) => String(u).includes('homeAddress'))).toBe(false);
   });
 });

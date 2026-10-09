@@ -1,12 +1,18 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { RefreshCw, Loader2 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { RefreshCw, Loader2, X, MapPin } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
 import { travelSourceLabel, type ActivityTravelSource } from '@/lib/utils/activityTravelResolution';
+
+interface DestinationPin {
+  address: string;
+  lat: number;
+  lon: number;
+}
 
 interface UpcomingTravelItem {
   linkId: string;
@@ -15,9 +21,18 @@ interface UpcomingTravelItem {
   memberName: string | null;
   destination: string | null;
   departureLocationOverride: string | null;
+  destinationOverrideCoords: DestinationPin | null;
   travelMinutesOverride: number | null;
   travelSource: ActivityTravelSource;
   travelMinutes: number | null;
+}
+
+interface GeocodeCandidate {
+  placeId: number;
+  displayName: string;
+  fullName: string;
+  latitude: number;
+  longitude: number;
 }
 
 function formatEventTime(iso: string): string {
@@ -51,9 +66,107 @@ function describeFailure(failureReason: string | null): string {
       return 'The routing service timed out.';
     case 'not_configured':
       return 'No routing provider is configured.';
+    case 'implausible_distance':
+      return 'That destination looks too far away to be right — double-check it below.';
     default:
       return 'The routing service could not calculate a route.';
   }
+}
+
+/**
+ * Phase 4B requirement 6: lets a parent search and pin the exact
+ * destination for one activity, the same debounced-search-dropdown
+ * pattern HomeAddressCard uses. Once pinned, computeActivityTravel uses
+ * these coordinates directly rather than re-geocoding free text (see
+ * setActivityDestinationOverride) — this is what makes a correction for
+ * an ambiguous or wrongly-matched address (e.g. the HTTP 400 "route
+ * distance too large" case) stick permanently, not just until the next
+ * recompute re-derives the same wrong match from the same text.
+ */
+function DestinationPicker({ item, onSaved }: { item: UpcomingTravelItem; onSaved: () => void }) {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<GeocodeCandidate[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    if (query.trim().length < 2) { setResults([]); return; }
+    searchTimer.current = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const res = await fetch(`/api/travel/geocode?q=${encodeURIComponent(query)}`);
+        const data = await res.json();
+        setResults(data.results ?? []);
+      } finally {
+        setSearching(false);
+      }
+    }, 350);
+    return () => { if (searchTimer.current) clearTimeout(searchTimer.current); };
+  }, [query]);
+
+  const save = async (destination: DestinationPin | null) => {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/activity-matching/links/${item.linkId}/destination`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ destination }),
+      });
+      if (!res.ok) throw new Error(destination ? 'Failed to save destination' : 'Failed to clear destination');
+      toast({ title: destination ? 'Destination updated' : 'Destination cleared' });
+      setQuery('');
+      setResults([]);
+      onSaved();
+    } catch (err) {
+      toast({ title: err instanceof Error ? err.message : 'Failed to save destination', variant: 'destructive' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (item.destinationOverrideCoords) {
+    return (
+      <div className="flex items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-xs">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <MapPin className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <span className="truncate">{item.destinationOverrideCoords.address}</span>
+        </div>
+        <Button size="icon" variant="ghost" onClick={() => save(null)} disabled={saving} aria-label="Clear pinned destination">
+          <X className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative">
+      <Input
+        placeholder="Fix destination..."
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        disabled={saving}
+        className="h-8 text-xs"
+      />
+      {searching && <p className="text-xs text-muted-foreground mt-1">Searching...</p>}
+      {results.length > 0 && (
+        <div className="absolute z-10 mt-1 w-full rounded-md border bg-popover shadow-md">
+          {results.map((r) => (
+            <button
+              key={r.placeId}
+              type="button"
+              className="block w-full text-left px-3 py-2 text-xs hover:bg-accent disabled:opacity-50"
+              onClick={() => save({ address: r.fullName, lat: r.latitude, lon: r.longitude })}
+              disabled={saving}
+            >
+              {r.fullName}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -136,7 +249,7 @@ export function ActivityTravelPanel() {
       <CardHeader>
         <CardTitle>Upcoming Activity Travel</CardTitle>
         <CardDescription>
-          Driving-time estimates for the next two weeks. Set a one-off departure point for a specific activity, or refresh an estimate on demand.
+          Driving-time estimates for the next two weeks. Set a one-off departure point, fix an incorrect destination, or refresh an estimate on demand.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-2">
@@ -175,6 +288,7 @@ export function ActivityTravelPanel() {
                 <RefreshCw className={refreshingId === item.linkId ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
               </Button>
             </div>
+            <DestinationPicker item={item} onSaved={load} />
           </div>
         ))}
       </CardContent>
