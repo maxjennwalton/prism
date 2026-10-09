@@ -15,7 +15,10 @@
  *                           household Home address configured
  *   - ambiguous_address:   a geocode attempt on either side failed or came
  *                           back ambiguous (travel_meta failureReason
- *                           prefixed departure_/destination_)
+ *                           prefixed departure_/destination_), or the
+ *                           resolved pair was flagged implausible_distance
+ *                           (confidently wrong, not merely ambiguous — see
+ *                           activityTravelResolution.ts's haversine gate)
  *   - unavailable_route:   the address resolved fine but the routing
  *                           provider itself failed (timeout, rate limit,
  *                           provider error, not configured)
@@ -68,8 +71,19 @@ interface ReviewCandidateRow {
   profileDefaultLocation: string | null;
 }
 
+/**
+ * `implausible_distance` (the resolved departure/destination pair is too
+ * far apart to be a real local activity — see
+ * MAX_PLAUSIBLE_ACTIVITY_DISTANCE_METERS) is grouped with the geocode-side
+ * departure_/destination_ failures, not with provider-side ones: from a
+ * parent's perspective it's the same "this location might be wrong,
+ * please check it" actionable category, even though it's caught by a
+ * distance gate rather than the ambiguity heuristic.
+ */
 function classifyFailure(failureReason: string): 'ambiguous_address' | 'unavailable_route' {
-  return failureReason.startsWith('departure_') || failureReason.startsWith('destination_')
+  return failureReason.startsWith('departure_') ||
+    failureReason.startsWith('destination_') ||
+    failureReason === 'implausible_distance'
     ? 'ambiguous_address'
     : 'unavailable_route';
 }

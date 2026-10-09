@@ -152,6 +152,12 @@ describe('detectWeeklyReviewIssues', () => {
       const [issue] = await detectWeeklyReviewIssues();
       expect(issue).toMatchObject({ type: 'ambiguous_address', detail: 'destination_ambiguous_address' });
     });
+
+    it('flags implausible_distance as ambiguous_address, not unavailable_route — a confidently-wrong match is the same "check this address" category as an ambiguous one', async () => {
+      mockSelectChain([row({ travelMeta: { status: 'unavailable', minutes: null, provider: 'none', calculatedAt: 'x', distanceMeters: null, durationSeconds: null, departureInputHash: 'a', destinationInputHash: 'b', failureReason: 'implausible_distance' } })]);
+      const [issue] = await detectWeeklyReviewIssues();
+      expect(issue).toMatchObject({ type: 'ambiguous_address', detail: 'implausible_distance' });
+    });
   });
 
   describe('unavailable_route', () => {
