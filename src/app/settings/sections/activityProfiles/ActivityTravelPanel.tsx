@@ -1,13 +1,16 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { RefreshCw, Loader2, X, MapPin } from 'lucide-react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { RefreshCw, Loader2, X, MapPin, Pencil } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
 import { travelSourceLabel, type ActivityTravelSource } from '@/lib/utils/activityTravelResolution';
 import { parseVenueLocation } from '@/lib/utils/activityVenueParsing';
+
+/** Above the app's fixed bottom nav (z-40/z-50 — see MobileNav.tsx) so the suggestion dropdown is never hidden under it on mobile. */
+const DROPDOWN_Z_INDEX = 'z-[60]';
 
 interface DestinationPin {
   address: string;
@@ -78,6 +81,11 @@ function describeFailure(failureReason: string | null): string {
   }
 }
 
+/** Pluralizes "N matching activity/activities" for the broad-correction confirmation UI and its follow-up toast. */
+function matchingActivityLabel(count: number): string {
+  return `${count} matching activit${count === 1 ? 'y' : 'ies'}`;
+}
+
 /**
  * Phase 4B requirement 6: lets a parent search and pin the exact
  * destination for one activity, the same debounced-search-dropdown
@@ -94,13 +102,43 @@ function describeFailure(failureReason: string | null): string {
  * activityVenueParsing.ts) rather than empty, so a parent fixing "Eddie
  * Bush Arena - 100 First St, Midland ON" doesn't have to retype the venue
  * name — they can just pick the right search result.
+ *
+ * Also offers reusing the correction across every OTHER settled event
+ * whose raw calendar location is the exact same literal text (requirement
+ * 1) — shown as an inline, dismissable confirmation after saving, never
+ * applied automatically, since a bare/short original string (e.g.
+ * "Wasaga") can be geographically ambiguous.
  */
 function DestinationPicker({ item, onSaved }: { item: UpcomingTravelItem; onSaved: () => void }) {
   const [query, setQuery] = useState(() => parseVenueLocation(item.destination).venueName ?? '');
   const [results, setResults] = useState<GeocodeCandidate[]>([]);
   const [searching, setSearching] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const [editing, setEditing] = useState(false);
+  const [broadApply, setBroadApply] = useState<{ venueId: string; matchingEventCount: number } | null>(null);
+  const [applyingBroad, setApplyingBroad] = useState(false);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const closeResults = () => {
+    setResults([]);
+    setActiveIndex(-1);
+  };
+
+  // Close on a click/tap anywhere outside this picker — including into a
+  // different activity's own search field, which is exactly how two
+  // dropdowns used to end up open and overlapping at once.
+  useEffect(() => {
+    if (results.length === 0) return;
+    function handlePointerDown(e: PointerEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        closeResults();
+      }
+    }
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [results.length]);
 
   useEffect(() => {
     if (searchTimer.current) clearTimeout(searchTimer.current);
@@ -111,6 +149,7 @@ function DestinationPicker({ item, onSaved }: { item: UpcomingTravelItem; onSave
         const res = await fetch(`/api/travel/geocode?q=${encodeURIComponent(query)}`);
         const data = await res.json();
         setResults(data.results ?? []);
+        setActiveIndex(-1);
       } finally {
         setSearching(false);
       }
@@ -119,6 +158,7 @@ function DestinationPicker({ item, onSaved }: { item: UpcomingTravelItem; onSave
   }, [query]);
 
   const save = async (destination: DestinationPin | null) => {
+    closeResults(); // close immediately on selection — never wait on the network round-trip
     setSaving(true);
     try {
       const res = await fetch(`/api/activity-matching/links/${item.linkId}/destination`, {
@@ -127,9 +167,19 @@ function DestinationPicker({ item, onSaved }: { item: UpcomingTravelItem; onSave
         body: JSON.stringify({ destination }),
       });
       if (!res.ok) throw new Error(destination ? 'Failed to save destination' : 'Failed to clear destination');
-      toast({ title: destination ? 'Destination updated' : 'Destination cleared' });
+
+      if (destination) {
+        const data = await res.json();
+        toast({ title: 'Venue saved.' });
+        if (data.venueId && data.matchingEventCount > 0) {
+          setBroadApply({ venueId: data.venueId, matchingEventCount: data.matchingEventCount });
+        }
+      } else {
+        toast({ title: 'Destination cleared' });
+      }
+
       setQuery('');
-      setResults([]);
+      setEditing(false);
       onSaved();
     } catch (err) {
       toast({ title: err instanceof Error ? err.message : 'Failed to save destination', variant: 'destructive' });
@@ -138,43 +188,127 @@ function DestinationPicker({ item, onSaved }: { item: UpcomingTravelItem; onSave
     }
   };
 
-  if (item.destinationOverrideCoords) {
-    return (
-      <div className="flex items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-xs">
-        <div className="flex items-center gap-1.5 min-w-0">
-          <MapPin className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <span className="truncate">{item.destinationOverrideCoords.address}</span>
-        </div>
-        <Button size="icon" variant="ghost" onClick={() => save(null)} disabled={saving} aria-label="Clear pinned destination">
-          <X className="h-3.5 w-3.5" />
-        </Button>
-      </div>
-    );
-  }
+  const applyToMatching = async () => {
+    if (!broadApply) return;
+    setApplyingBroad(true);
+    try {
+      const res = await fetch(`/api/activity-matching/links/${item.linkId}/destination/apply-to-matching`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ venueId: broadApply.venueId }),
+      });
+      if (!res.ok) throw new Error('Failed to apply the correction to other activities');
+      const data = await res.json();
+      toast({ title: `Venue saved. Updated ${matchingActivityLabel(data.updatedCount)}.` });
+      setBroadApply(null);
+      onSaved();
+    } catch (err) {
+      toast({ title: err instanceof Error ? err.message : 'Failed to apply the correction', variant: 'destructive' });
+    } finally {
+      setApplyingBroad(false);
+    }
+  };
+
+  const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (results.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveIndex((i) => (i + 1) % results.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveIndex((i) => (i <= 0 ? results.length - 1 : i - 1));
+    } else if (e.key === 'Enter') {
+      const r = activeIndex >= 0 ? results[activeIndex] : undefined;
+      if (r) {
+        e.preventDefault();
+        save({ address: r.fullName, lat: r.latitude, lon: r.longitude });
+      }
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      closeResults();
+    }
+  };
+
+  const pinned = item.destinationOverrideCoords;
 
   return (
-    <div className="relative">
-      <Input
-        placeholder="Fix destination..."
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        disabled={saving}
-        className="h-8 text-xs"
-      />
-      {searching && <p className="text-xs text-muted-foreground mt-1">Searching...</p>}
-      {results.length > 0 && (
-        <div className="absolute z-10 mt-1 w-full rounded-md border bg-popover shadow-md">
-          {results.map((r) => (
-            <button
-              key={r.placeId}
-              type="button"
-              className="block w-full text-left px-3 py-2 text-xs hover:bg-accent disabled:opacity-50"
-              onClick={() => save({ address: r.fullName, lat: r.latitude, lon: r.longitude })}
-              disabled={saving}
+    <div className="space-y-2">
+      {pinned && !editing ? (
+        <div className="flex items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-xs">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <MapPin className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <span className="truncate">{pinned.address}</span>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            <Button size="icon" variant="ghost" onClick={() => setEditing(true)} disabled={saving} aria-label="Change destination">
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+            <Button size="icon" variant="ghost" onClick={() => save(null)} disabled={saving} aria-label="Clear pinned destination">
+              <X className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="relative" ref={containerRef}>
+          <Input
+            placeholder="Fix destination..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={handleKeyDown}
+            disabled={saving}
+            className="h-8 text-xs"
+            role="combobox"
+            aria-expanded={results.length > 0}
+            aria-controls={`${item.linkId}-destination-results`}
+            aria-activedescendant={activeIndex >= 0 ? `${item.linkId}-destination-result-${activeIndex}` : undefined}
+            autoComplete="off"
+          />
+          {pinned && editing && (
+            <Button size="sm" variant="ghost" className="mt-1 h-6 text-xs" onClick={() => setEditing(false)} disabled={saving}>
+              Cancel
+            </Button>
+          )}
+          {searching && <p className="text-xs text-muted-foreground mt-1">Searching...</p>}
+          {results.length > 0 && (
+            <div
+              id={`${item.linkId}-destination-results`}
+              role="listbox"
+              className={`absolute ${DROPDOWN_Z_INDEX} top-full left-0 right-0 mt-1 max-h-60 overflow-y-auto rounded-md border bg-popover shadow-md`}
             >
-              {r.fullName}
-            </button>
-          ))}
+              {results.map((r, index) => (
+                <button
+                  key={r.placeId}
+                  id={`${item.linkId}-destination-result-${index}`}
+                  type="button"
+                  role="option"
+                  aria-selected={index === activeIndex}
+                  className={`block w-full text-left px-3 py-2 text-xs hover:bg-accent disabled:opacity-50 ${index === activeIndex ? 'bg-accent' : ''}`}
+                  onClick={() => save({ address: r.fullName, lat: r.latitude, lon: r.longitude })}
+                  onMouseEnter={() => setActiveIndex(index)}
+                  disabled={saving}
+                >
+                  {r.fullName}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {broadApply && (
+        <div className="rounded-md border border-dashed p-2 text-xs space-y-1.5">
+          <p>
+            {matchingActivityLabel(broadApply.matchingEventCount)} also use this exact location text. Apply this
+            correction to all of them?
+          </p>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" onClick={applyToMatching} disabled={applyingBroad}>
+              {applyingBroad ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : `Apply to ${matchingActivityLabel(broadApply.matchingEventCount)}`}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setBroadApply(null)} disabled={applyingBroad}>
+              Just this one
+            </Button>
+          </div>
         </div>
       )}
     </div>

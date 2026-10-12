@@ -2045,6 +2045,37 @@ export const activityVenues = pgTable('activity_venues', {
 
 export type ActivityVenueSource = 'nominatim' | 'google_places' | 'parent_confirmed';
 
+/**
+ * A household-wide mapping from a raw, literal calendar-location string
+ * (e.g. "Wasaga" — not the parsed venue name, not a specific address) to
+ * one verified venue. Deliberately separate from activity_venues.aliases:
+ * that array is keyed by the venue's own (parsed) name and is always
+ * written automatically on a confident match; this table is written only
+ * after a parent explicitly confirms applying a correction broadly,
+ * because a bare, short, or generic original string ("Wasaga") is exactly
+ * the case that can be geographically ambiguous and must never be
+ * auto-applied to every event sharing that text without a human okaying
+ * it first. See src/lib/services/activityLocationAliases.ts.
+ *
+ * normalized_location is unique: one raw string maps to exactly one venue
+ * at a time. Remapping it to a different venue is an explicit overwrite
+ * (confirmLocationAlias's conflict check), never a second silent row.
+ */
+export const activityLocationAliases = pgTable('activity_location_aliases', {
+  id: uuid('id').defaultRandom().primaryKey(),
+
+  // Lowercased, whitespace-collapsed form of the original raw calendar
+  // location text — see normalizeLocationText in activityLocationAliases.ts.
+  normalizedLocation: varchar('normalized_location', { length: 500 }).notNull(),
+
+  venueId: uuid('venue_id').notNull().references(() => activityVenues.id, { onDelete: 'cascade' }),
+
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => ({
+  normalizedLocationUnique: uniqueIndex('activity_location_aliases_normalized_location_unique').on(table.normalizedLocation),
+}));
+
 export const activityProfiles = pgTable('activity_profiles', {
   id: uuid('id').defaultRandom().primaryKey(),
 

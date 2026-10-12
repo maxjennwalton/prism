@@ -26,6 +26,18 @@
  * The absolute plausibility bound on a resolved departure/destination pair
  * is a separate, later gate (MAX_PLAUSIBLE_ACTIVITY_DISTANCE_METERS in
  * activityTravelResolution.ts).
+ *
+ * A real street address commonly comes back from Nominatim as a mix of a
+ * road/highway segment match (the street itself) and a building/POI/
+ * address-point match (an actual place on that street) — e.g. a soccer
+ * facility's own street address resolving to both "Sandford Fleming Dr"
+ * (class: highway) and the specific building at that address (class:
+ * building/amenity/place). These are not two competing real-world
+ * destinations; the road segment is noise a destination search should
+ * never be resolving to. Candidates are filtered down to the non-road
+ * ones (when at least one exists) *before* the proximity/importance
+ * checks below — this is a real signal Nominatim already returns
+ * (GeocodeResult.class/type) that was previously computed and discarded.
  */
 import type { GeocodeResult } from '@/lib/integrations/geocode';
 import { type GeoPoint, haversineDistanceMeters, isAmbiguousGeocodeMatch } from './activityTravelResolution';
@@ -56,6 +68,11 @@ function distanceTo(bias: GeoPoint, candidate: GeocodeResult): number {
   return haversineDistanceMeters(bias, { lat: candidate.latitude, lon: candidate.longitude });
 }
 
+/** Nominatim's `class` for a plain road/street-segment match, never itself a destination. */
+function isRoadSegment(candidate: GeocodeResult): boolean {
+  return candidate.class === 'highway';
+}
+
 /**
  * Decides whether a set of geocode candidates for one search query can be
  * auto-accepted, and which one. Never picks a candidate when the result is
@@ -66,6 +83,11 @@ function distanceTo(bias: GeoPoint, candidate: GeocodeResult): number {
 export function evaluateVenueCandidates(candidates: GeocodeResult[], bias?: GeoPoint): VenueConfidenceResult {
   if (candidates.length === 0) return { accepted: null, reason: 'no_candidates' };
   if (candidates.length === 1) return { accepted: candidates[0] as GeocodeResult, reason: 'unique_match' };
+
+  const places = candidates.filter((c) => !isRoadSegment(c));
+  if (places.length > 0 && places.length < candidates.length) {
+    return evaluateVenueCandidates(places, bias);
+  }
 
   if (bias) {
     const byDistance = [...candidates].sort((a, b) => distanceTo(bias, a) - distanceTo(bias, b));

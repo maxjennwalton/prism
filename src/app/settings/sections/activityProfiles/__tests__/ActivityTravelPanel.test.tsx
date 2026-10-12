@@ -393,3 +393,223 @@ describe('ActivityTravelPanel — destination correction (requirement 6: select 
     expect((global.fetch as jest.Mock).mock.calls.some(([u]) => String(u).includes('homeAddress'))).toBe(false);
   });
 });
+
+const GEOCODE_RESULT = { placeId: 1, displayName: 'All Around', fullName: 'All Around Athletics Centre, 91 Sandford Fleming Dr', latitude: 40.1, longitude: -75.1 };
+
+describe('ActivityTravelPanel — dropdown UX (requirement 4: closing, positioning, keyboard, mobile)', () => {
+  beforeEach(() => {
+    jest.useFakeTimers({ legacyFakeTimers: false });
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  async function openResults(itemOverrides: Partial<Record<string, unknown>> = {}) {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ json: async () => ({ items: [item(itemOverrides)] }) });
+    render(<ActivityTravelPanel />);
+    await flush();
+
+    fireEvent.change(screen.getByPlaceholderText(/fix destination/i), { target: { value: 'All Around' } });
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ json: async () => ({ results: [GEOCODE_RESULT] }) });
+    await act(async () => { jest.advanceTimersByTime(400); });
+    await flush();
+  }
+
+  it('closes the dropdown immediately after selecting a result, before the save request even resolves', async () => {
+    await openResults();
+    expect(screen.getByText(GEOCODE_RESULT.fullName)).not.toBeNull();
+
+    // Never resolves during this test — proves the dropdown closes
+    // synchronously on click, not as a side effect of the save finishing.
+    (global.fetch as jest.Mock).mockReturnValueOnce(new Promise(() => {}));
+    fireEvent.click(screen.getByText(GEOCODE_RESULT.fullName));
+
+    expect(screen.queryByText(GEOCODE_RESULT.fullName)).toBeNull();
+  });
+
+  it('closes the dropdown on a click outside the search field', async () => {
+    await openResults();
+    expect(screen.getByText(GEOCODE_RESULT.fullName)).not.toBeNull();
+
+    fireEvent.pointerDown(document.body);
+
+    expect(screen.queryByText(GEOCODE_RESULT.fullName)).toBeNull();
+  });
+
+  it('never closes the dropdown when clicking inside the search input itself', async () => {
+    await openResults();
+    fireEvent.pointerDown(screen.getByPlaceholderText(/fix destination/i));
+    expect(screen.getByText(GEOCODE_RESULT.fullName)).not.toBeNull();
+  });
+
+  it('closes the dropdown on Escape', async () => {
+    await openResults();
+    expect(screen.getByText(GEOCODE_RESULT.fullName)).not.toBeNull();
+
+    fireEvent.keyDown(screen.getByPlaceholderText(/fix destination/i), { key: 'Escape' });
+
+    expect(screen.queryByText(GEOCODE_RESULT.fullName)).toBeNull();
+  });
+
+  it('clears a previous activity\'s open dropdown when the parent interacts with a different activity\'s search field', async () => {
+    // item-2's destination has no parseable venue name (a bare street
+    // address), so its search box pre-fills empty and never auto-searches
+    // on mount — isolating this test to item-1's own dropdown behavior.
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      json: async () => ({
+        items: [
+          item({ linkId: 'link-1', eventTitle: 'Hockey' }),
+          item({ linkId: 'link-2', eventTitle: 'Soccer', destination: '123 Main Street, Collingwood ON' }),
+        ],
+      }),
+    });
+    render(<ActivityTravelPanel />);
+    await flush();
+
+    const [firstInput, secondInput] = screen.getAllByPlaceholderText(/fix destination/i);
+    fireEvent.change(firstInput!, { target: { value: 'All Around' } });
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ json: async () => ({ results: [GEOCODE_RESULT] }) });
+    await act(async () => { jest.advanceTimersByTime(400); });
+    await flush();
+    expect(screen.getByText(GEOCODE_RESULT.fullName)).not.toBeNull();
+
+    fireEvent.pointerDown(secondInput!);
+
+    expect(screen.queryByText(GEOCODE_RESULT.fullName)).toBeNull();
+  });
+
+  it('navigates results with ArrowDown/ArrowUp and selects the highlighted one with Enter', async () => {
+    const second = { placeId: 2, displayName: 'Second', fullName: 'Second Place, ON', latitude: 1, longitude: 2 };
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ json: async () => ({ items: [item()] }) });
+    render(<ActivityTravelPanel />);
+    await flush();
+
+    const input = screen.getByPlaceholderText(/fix destination/i);
+    fireEvent.change(input, { target: { value: 'Place' } });
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ json: async () => ({ results: [GEOCODE_RESULT, second] }) });
+    await act(async () => { jest.advanceTimersByTime(400); });
+    await flush();
+
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ destination: second, travelMeta: null, venueId: null, matchingEventCount: 0 }) })
+      .mockResolvedValueOnce({ json: async () => ({ items: [item()] }) });
+
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await flush();
+
+    const saveCall = (global.fetch as jest.Mock).mock.calls.find(([url]) => String(url) === '/api/activity-matching/links/link-1/destination');
+    expect(JSON.parse(saveCall![1].body)).toEqual({ destination: { address: second.fullName, lat: second.latitude, lon: second.longitude } });
+  });
+
+  it('exposes combobox/listbox ARIA roles for keyboard and screen-reader navigation', async () => {
+    await openResults();
+    const input = screen.getByPlaceholderText(/fix destination/i);
+    expect(input.getAttribute('role')).toBe('combobox');
+    expect(input.getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByRole('listbox')).not.toBeNull();
+    expect(screen.getByRole('option', { name: GEOCODE_RESULT.fullName })).not.toBeNull();
+  });
+
+  it('shows a "Change" action alongside the pinned venue, which reopens the search box without clearing the pin', async () => {
+    const pin = { address: 'All Around Athletics Centre, 91 Sandford Fleming Dr', lat: 40.1, lon: -75.1 };
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ json: async () => ({ items: [item({ destinationOverrideCoords: pin })] }) });
+    render(<ActivityTravelPanel />);
+    await flush();
+
+    fireEvent.click(screen.getByLabelText(/change destination/i));
+
+    expect(screen.getByPlaceholderText(/fix destination/i)).not.toBeNull();
+    expect(screen.queryByText(pin.address)).toBeNull();
+  });
+
+  it('cancelling a "Change" in progress restores the pinned venue display without saving anything', async () => {
+    const pin = { address: 'All Around Athletics Centre, 91 Sandford Fleming Dr', lat: 40.1, lon: -75.1 };
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ json: async () => ({ items: [item({ destinationOverrideCoords: pin })] }) });
+    render(<ActivityTravelPanel />);
+    await flush();
+
+    fireEvent.click(screen.getByLabelText(/change destination/i));
+    fireEvent.click(screen.getByText('Cancel'));
+
+    expect(screen.getByText(pin.address)).not.toBeNull();
+    expect(screen.queryByPlaceholderText(/fix destination/i)).toBeNull();
+    const saveCall = (global.fetch as jest.Mock).mock.calls.find(([url]) => String(url) === '/api/activity-matching/links/link-1/destination');
+    expect(saveCall).toBeUndefined();
+  });
+});
+
+describe('ActivityTravelPanel — reusing a correction across matching activities (requirement 1/5)', () => {
+  beforeEach(() => {
+    jest.useFakeTimers({ legacyFakeTimers: false });
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  async function saveDestinationWithMatches(matchingEventCount: number) {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ json: async () => ({ items: [item()] }) });
+    render(<ActivityTravelPanel />);
+    await flush();
+
+    fireEvent.change(screen.getByPlaceholderText(/fix destination/i), { target: { value: 'Wasaga' } });
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ json: async () => ({ results: [GEOCODE_RESULT] }) });
+    await act(async () => { jest.advanceTimersByTime(400); });
+    await flush();
+
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ destination: GEOCODE_RESULT, travelMeta: null, venueId: 'venue-wasaga', matchingEventCount }),
+      })
+      .mockResolvedValueOnce({ json: async () => ({ items: [item({ destinationOverrideCoords: GEOCODE_RESULT })] }) });
+
+    fireEvent.click(screen.getByText(GEOCODE_RESULT.fullName));
+    await flush();
+  }
+
+  it('shows the matching-event count before applying anything broadly, with no apply-to-matching call yet', async () => {
+    await saveDestinationWithMatches(4);
+    expect(screen.getByText(/4 matching activities also use this exact location text/i)).not.toBeNull();
+    expect((global.fetch as jest.Mock).mock.calls.some(([u]) => String(u).includes('apply-to-matching'))).toBe(false);
+  });
+
+  it('shows no broad-apply prompt at all when nothing else matches', async () => {
+    await saveDestinationWithMatches(0);
+    expect(screen.queryByText(/matching activit/i)).toBeNull();
+  });
+
+  it('singularizes the count for exactly one other matching event', async () => {
+    await saveDestinationWithMatches(1);
+    expect(screen.getByText(/1 matching activity also use this exact location text/i)).not.toBeNull();
+  });
+
+  it('applies the correction to matching activities on confirm and shows "Venue saved. Updated N matching activities."', async () => {
+    await saveDestinationWithMatches(4);
+
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: true, json: async () => ({ updatedCount: 4 }) });
+    (global.fetch as jest.Mock).mockResolvedValueOnce({ json: async () => ({ items: [item({ destinationOverrideCoords: GEOCODE_RESULT })] }) });
+
+    fireEvent.click(screen.getByText(/apply to 4 matching activities/i));
+    await flush();
+
+    const applyCall = (global.fetch as jest.Mock).mock.calls.find(([url]) => String(url) === '/api/activity-matching/links/link-1/destination/apply-to-matching');
+    expect(applyCall).toBeDefined();
+    expect(JSON.parse(applyCall![1].body)).toEqual({ venueId: 'venue-wasaga' });
+    expect(mockToast).toHaveBeenCalledWith(expect.objectContaining({ title: 'Venue saved. Updated 4 matching activities.' }));
+    expect(screen.queryByText(/matching activit/i)).toBeNull();
+  });
+
+  it('dismisses the prompt with "Just this one" and never calls apply-to-matching', async () => {
+    await saveDestinationWithMatches(4);
+
+    fireEvent.click(screen.getByText('Just this one'));
+
+    expect(screen.queryByText(/matching activit/i)).toBeNull();
+    expect((global.fetch as jest.Mock).mock.calls.some(([u]) => String(u).includes('apply-to-matching'))).toBe(false);
+  });
+});

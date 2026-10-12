@@ -17,6 +17,13 @@ jest.mock('@/lib/services/activityVenues', () => ({
   upsertVenue: (...a: unknown[]) => mockUpsertVenue(...a),
 }));
 
+const mockGetLinkOriginalLocation = jest.fn();
+const mockFindMatchingLinkIds = jest.fn();
+jest.mock('@/lib/services/activityLocationAliases', () => ({
+  getLinkOriginalLocation: (...a: unknown[]) => mockGetLinkOriginalLocation(...a),
+  findMatchingLinkIds: (...a: unknown[]) => mockFindMatchingLinkIds(...a),
+}));
+
 jest.mock('@/lib/utils/logError', () => ({ logError: jest.fn() }));
 
 import { POST } from '../route';
@@ -34,6 +41,8 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockSetOverride.mockResolvedValue(undefined);
   mockUpsertVenue.mockResolvedValue({ id: 'venue-1' });
+  mockGetLinkOriginalLocation.mockResolvedValue('All Around Athletics Centre - 91 Sandford Fleming Dr');
+  mockFindMatchingLinkIds.mockResolvedValue([]);
 });
 
 describe('POST /api/activity-matching/links/[id]/destination', () => {
@@ -79,7 +88,13 @@ describe('POST /api/activity-matching/links/[id]/destination', () => {
 
     expect(mockSetOverride).toHaveBeenCalledWith('link-1', CANDIDATE);
     expect(mockRecompute).toHaveBeenCalledWith('link-1');
-    expect(json).toEqual({ destination: CANDIDATE, travelMeta: { status: 'ok', minutes: 7 } });
+    expect(json).toEqual({
+      destination: CANDIDATE,
+      travelMeta: { status: 'ok', minutes: 7 },
+      venueId: 'venue-1',
+      originalLocation: 'All Around Athletics Centre - 91 Sandford Fleming Dr',
+      matchingEventCount: 0,
+    });
   });
 
   it('trims the address but never alters the coordinates given', async () => {
@@ -161,5 +176,52 @@ describe('POST /api/activity-matching/links/[id]/destination — permanent venue
 
     expect(res.status).toBe(200);
     expect(mockSetOverride).toHaveBeenCalledWith('link-1', CANDIDATE);
+  });
+});
+
+describe('POST /api/activity-matching/links/[id]/destination — matching-event count (requirement 1: offer to reuse across other events)', () => {
+  beforeEach(() => {
+    mockRequireAuth.mockResolvedValue(parentAuth);
+    mockRequireRole.mockReturnValue(null);
+    mockRecompute.mockResolvedValue({ found: true, travelMeta: null });
+  });
+
+  it('reports how many other events share this exact raw calendar location text', async () => {
+    mockFindMatchingLinkIds.mockResolvedValue(['link-2', 'link-3', 'link-4']);
+
+    const res = await call('link-1', { destination: CANDIDATE });
+    const json = await res.json();
+
+    expect(mockFindMatchingLinkIds).toHaveBeenCalledWith('All Around Athletics Centre - 91 Sandford Fleming Dr', 'link-1');
+    expect(json.matchingEventCount).toBe(3);
+  });
+
+  it('never counts matching events or saves a broad alias when clearing a pin', async () => {
+    await call('link-1', { destination: null });
+    expect(mockFindMatchingLinkIds).not.toHaveBeenCalled();
+  });
+
+  it('never counts matching events when the venue-directory write itself failed (nothing to key the count on)', async () => {
+    mockUpsertVenue.mockRejectedValue(new Error('db unavailable'));
+    const res = await call('link-1', { destination: CANDIDATE });
+    const json = await res.json();
+    expect(mockFindMatchingLinkIds).not.toHaveBeenCalled();
+    expect(json.matchingEventCount).toBe(0);
+  });
+
+  it('never counts matching events when the picked address had no parseable venue name', async () => {
+    const bareAddress = { address: '123 Main Street, Collingwood, ON', lat: 44.5, lon: -80.2 };
+    const res = await call('link-1', { destination: bareAddress });
+    const json = await res.json();
+    expect(mockFindMatchingLinkIds).not.toHaveBeenCalled();
+    expect(json.matchingEventCount).toBe(0);
+  });
+
+  it('this route alone never applies the correction to other events — only counts them', async () => {
+    mockFindMatchingLinkIds.mockResolvedValue(['link-2']);
+    await call('link-1', { destination: CANDIDATE });
+    // No alias-confirming or recompute call for any link other than the one requested.
+    expect(mockRecompute).toHaveBeenCalledTimes(1);
+    expect(mockRecompute).toHaveBeenCalledWith('link-1');
   });
 });

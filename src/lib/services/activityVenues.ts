@@ -7,6 +7,12 @@
  *
  * Progressive search order, each stage only tried if the previous one
  * didn't produce a confident match (see evaluateVenueCandidates):
+ *   0. A confirmed household-wide alias (src/lib/db/schema.ts
+ *      activity_location_aliases) for this exact raw text — see
+ *      activityLocationAliases.ts. Written only after a parent explicitly
+ *      confirms applying a correction broadly (e.g. "Wasaga" -> Wasaga
+ *      Beach Arena for every other event literally saying "Wasaga"),
+ *      never automatically — zero network calls either way.
  *   1. A saved venue (src/lib/db/schema.ts activity_venues) matching the
  *      parsed venue name — zero network calls, the whole point of the
  *      directory.
@@ -39,6 +45,7 @@
 import { eq } from 'drizzle-orm';
 import { db, type DbExecutor } from '@/lib/db/client';
 import { activityVenues, type ActivityVenueSource } from '@/lib/db/schema';
+import { findLocationAlias } from '@/lib/services/activityLocationAliases';
 import { geocodeAddress, type GeocodeBias, type GeocodeResult } from '@/lib/integrations/geocode';
 import { isGooglePlacesConfigured, searchGooglePlaces } from '@/lib/integrations/googlePlaces';
 import { evaluateVenueCandidates } from '@/lib/utils/activityVenueConfidence';
@@ -270,6 +277,14 @@ export async function resolveVenueDestination(
   bias: GeocodeBias | undefined,
   executor: DbExecutor = db,
 ): Promise<VenueDestinationResolution> {
+  // A household-wide confirmed alias for this exact raw text (e.g.
+  // "Wasaga" -> Wasaga Beach Arena) is the most literal match available —
+  // checked before even the parsed-venue-name lookup, zero network calls.
+  const aliased = await findLocationAlias(rawLocation, executor);
+  if (aliased) {
+    return { ok: true, venueId: aliased.venueId, location: { address: aliased.address, lat: aliased.lat, lon: aliased.lon } };
+  }
+
   const parsed = parseVenueLocation(rawLocation);
 
   if (parsed.venueName) {

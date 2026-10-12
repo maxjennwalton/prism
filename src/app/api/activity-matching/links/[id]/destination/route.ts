@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { withAuth } from '@/lib/api/withAuth';
 import { setActivityDestinationOverride, recomputeActivityTravelForLink } from '@/lib/services/activityTravel';
 import { upsertVenue } from '@/lib/services/activityVenues';
+import { findMatchingLinkIds, getLinkOriginalLocation } from '@/lib/services/activityLocationAliases';
 import { parseVenueLocation } from '@/lib/utils/activityVenueParsing';
 import { logError } from '@/lib/utils/logError';
 import type { ActivityDestinationOverride } from '@/lib/db/schema';
@@ -33,14 +34,20 @@ function parseDestination(body: unknown): ActivityDestinationOverride | null | '
  * by its address, e.g. "Eddie Bush Arena, 100 First St, Midland, ON,
  * Canada") rather than the raw calendar text, so this needs no extra
  * lookup of the event itself. Best-effort: a failure here must never
- * block the pin save that the parent is actually waiting on.
+ * block the pin save that the parent is actually waiting on. Returns the
+ * saved venue's id (null on failure, or when the address had no
+ * parseable venue name at all) — the caller uses it to offer applying
+ * this same correction to other events sharing the exact original
+ * calendar location text (requirement 1), via the separate
+ * apply-to-matching route; this route itself never applies anything
+ * beyond the one link it was called for.
  */
-async function saveAsVerifiedVenue(destination: ActivityDestinationOverride): Promise<void> {
+async function saveAsVerifiedVenue(destination: ActivityDestinationOverride): Promise<string | null> {
   const parsed = parseVenueLocation(destination.address);
-  if (!parsed.venueName) return;
+  if (!parsed.venueName) return null;
 
   try {
-    await upsertVenue({
+    const saved = await upsertVenue({
       venueName: parsed.venueName,
       alias: destination.address,
       formattedAddress: destination.address,
@@ -49,8 +56,10 @@ async function saveAsVerifiedVenue(destination: ActivityDestinationOverride): Pr
       source: 'parent_confirmed',
       verified: true,
     });
+    return saved.id;
   } catch (error) {
     logError('Error saving parent-confirmed venue to the directory:', error);
+    return null;
   }
 }
 
@@ -70,6 +79,15 @@ async function saveAsVerifiedVenue(destination: ActivityDestinationOverride): Pr
  * saveAsVerifiedVenue — satisfying the requirement that a parent's
  * correction benefit every future event at the same venue, not just this
  * one occurrence.
+ *
+ * Also returns `venueId`, `originalLocation` (this link's own raw
+ * calendar location text), and `matchingEventCount` (how many OTHER
+ * settled links, excluding ones with their own destination pin, share
+ * that exact text) — read-only counting, never applying anything broadly
+ * itself. The UI uses this to offer "apply to N other events" (requirement
+ * 1), which a parent confirms separately via POST .../apply-to-matching;
+ * because a bare/short original string can be geographically ambiguous,
+ * nothing here creates a household-wide alias without that explicit step.
  */
 export async function POST(request: Request, { params }: RouteParams) {
   return withAuth(async () => {
@@ -86,14 +104,26 @@ export async function POST(request: Request, { params }: RouteParams) {
       }
 
       await setActivityDestinationOverride(id, destination);
-      if (destination) await saveAsVerifiedVenue(destination);
+
+      let venueId: string | null = null;
+      let originalLocation: string | null = null;
+      let matchingEventCount = 0;
+      if (destination) {
+        venueId = await saveAsVerifiedVenue(destination);
+        if (venueId) {
+          originalLocation = await getLinkOriginalLocation(id);
+          if (originalLocation) {
+            matchingEventCount = (await findMatchingLinkIds(originalLocation, id)).length;
+          }
+        }
+      }
 
       const { found, travelMeta } = await recomputeActivityTravelForLink(id);
       if (!found) {
         return NextResponse.json({ error: 'Activity link not found' }, { status: 404 });
       }
 
-      return NextResponse.json({ destination, travelMeta });
+      return NextResponse.json({ destination, travelMeta, venueId, originalLocation, matchingEventCount });
     } catch (error) {
       logError('Error saving activity destination override:', error);
       return NextResponse.json({ error: 'Failed to save destination override' }, { status: 500 });

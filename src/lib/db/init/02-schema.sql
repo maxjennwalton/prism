@@ -2745,6 +2745,17 @@ CREATE TABLE IF NOT EXISTS public.activity_venues (
 );
 CREATE INDEX IF NOT EXISTS activity_venues_normalized_name_idx ON public.activity_venues (normalized_name);
 
+-- Phase 4B (see drizzle/0032_activity_location_aliases.sql): household-wide
+-- raw-location-text aliases, written only after explicit parent confirmation.
+CREATE TABLE IF NOT EXISTS public.activity_location_aliases (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  normalized_location varchar(500) NOT NULL,
+  venue_id uuid NOT NULL REFERENCES public.activity_venues(id) ON DELETE CASCADE,
+  created_at timestamp DEFAULT now() NOT NULL,
+  updated_at timestamp DEFAULT now() NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS activity_location_aliases_normalized_location_unique ON public.activity_location_aliases (normalized_location);
+
 CREATE TABLE IF NOT EXISTS public.activity_gear_completions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   activity_event_link_id uuid NOT NULL REFERENCES public.activity_event_links(id) ON DELETE CASCADE,

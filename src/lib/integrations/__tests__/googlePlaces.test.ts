@@ -153,6 +153,24 @@ describe('searchGooglePlaces — response mapping', () => {
     expect(results).toHaveLength(1);
   });
 
+  it('never returns a permanently-closed place as a destination candidate', async () => {
+    mockFetchOnce({
+      status: 'OK',
+      results: [
+        placesResult({ business_status: 'CLOSED_PERMANENTLY' }),
+        placesResult({ place_id: 'ChIJ-still-open', business_status: 'OPERATIONAL' }),
+      ],
+    });
+    const results = await searchGooglePlaces('Eddie Bush Arena');
+    expect(results).toHaveLength(1);
+  });
+
+  it('still returns a result with no business_status field at all (not every real response includes it)', async () => {
+    mockFetchOnce({ status: 'OK', results: [placesResult()] });
+    const results = await searchGooglePlaces('Eddie Bush Arena');
+    expect(results).toHaveLength(1);
+  });
+
   it('caps results at 3 even when more are returned', async () => {
     mockFetchOnce({ status: 'OK', results: [placesResult(), placesResult(), placesResult(), placesResult()] });
     const results = await searchGooglePlaces('Arena');

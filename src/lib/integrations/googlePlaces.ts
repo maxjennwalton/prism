@@ -67,6 +67,8 @@ interface GooglePlacesResultItem {
   name?: string;
   formatted_address?: string;
   geometry?: { location?: { lat?: number; lng?: number } };
+  /** 'OPERATIONAL' | 'CLOSED_TEMPORARILY' | 'CLOSED_PERMANENTLY' — a permanently-closed place must never become a destination. */
+  business_status?: string;
 }
 
 interface GooglePlacesResponse {
@@ -98,6 +100,7 @@ async function fetchGooglePlaces(query: string, apiKey: string, bias?: GeocodeBi
     const lat = item.geometry?.location?.lat;
     const lon = item.geometry?.location?.lng;
     if (lat === undefined || lon === undefined || !item.name) continue;
+    if (item.business_status === 'CLOSED_PERMANENTLY') continue;
     results.push({
       placeId: index,
       displayName: item.name,

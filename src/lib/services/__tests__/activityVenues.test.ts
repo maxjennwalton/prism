@@ -32,6 +32,9 @@ jest.mock('drizzle-orm', () => ({ eq: (...a: unknown[]) => ({ op: 'eq', a }) }))
 const mockGeocodeAddress = jest.fn();
 jest.mock('@/lib/integrations/geocode', () => ({ geocodeAddress: (...a: unknown[]) => mockGeocodeAddress(...a) }));
 
+const mockFindLocationAlias = jest.fn();
+jest.mock('@/lib/services/activityLocationAliases', () => ({ findLocationAlias: (...a: unknown[]) => mockFindLocationAlias(...a) }));
+
 import { findVenueByName, resolveVenueDestination, upsertVenue } from '../activityVenues';
 
 function dbRow(overrides: Record<string, unknown> = {}) {
@@ -61,6 +64,7 @@ function selectAll(rows: unknown[]) {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockFindLocationAlias.mockResolvedValue(null);
 });
 
 describe('findVenueByName', () => {
@@ -424,5 +428,31 @@ describe('resolveVenueDestination — recurring events reuse a saved match (requ
       venueId: 'venue-osprey',
       location: { address: 'Osprey Community Arena, Osprey, ON', lat: 44.5005, lon: -80.2005 },
     });
+  });
+});
+
+describe('resolveVenueDestination — household-wide location alias (stage 0, checked before anything else)', () => {
+  it('resolves directly from a confirmed location alias with zero network calls and zero venue-directory lookups', async () => {
+    mockFindLocationAlias.mockResolvedValue({ venueId: 'venue-wasaga', address: 'Wasaga Beach Arena, Wasaga Beach, ON', lat: 44.52, lon: -80.02 });
+
+    const result = await resolveVenueDestination('Wasaga', { lat: 44.5, lon: -80.0 });
+
+    expect(result).toEqual({
+      ok: true,
+      venueId: 'venue-wasaga',
+      location: { address: 'Wasaga Beach Arena, Wasaga Beach, ON', lat: 44.52, lon: -80.02 },
+    });
+    expect(mockGeocodeAddress).not.toHaveBeenCalled();
+    expect(mockSelect).not.toHaveBeenCalled();
+  });
+
+  it('falls through to the normal venue-directory/geocoding pipeline when no alias is confirmed for this text', async () => {
+    mockFindLocationAlias.mockResolvedValue(null);
+    mockSelect.mockReturnValueOnce(selectWhere([dbRow()]));
+
+    const result = await resolveVenueDestination('Eddie Bush Arena', undefined);
+
+    expect(result.ok).toBe(true);
+    expect(mockFindLocationAlias).toHaveBeenCalledWith('Eddie Bush Arena', expect.anything());
   });
 });
