@@ -15,7 +15,12 @@
  *   4. Cleaned venue name + city/province.
  *   5. Venue name alone.
  *   6. The raw original text, as a last resort.
- * (see buildSearchQueries for the exact ordering/dedup logic.)
+ * (see buildSearchQueries for the exact ordering/dedup logic.) Each of
+ * these is itself tried narrow-then-wide (see searchNominatim) before
+ * moving to the next stage — a venue-name-only query (no address/city to
+ * narrow it with) benefits the most from this, since it's the one stage
+ * with no other lever to pull if Nominatim's own top 3 by raw relevance
+ * doesn't happen to include the right, merely-obscure place.
  *
  * A confident resolution from stage 2-6 is saved back to the venue
  * directory (source: 'nominatim') so every future event at the same place
@@ -196,14 +201,6 @@ export type VenueDestinationResolution =
   | { ok: true; location: ResolvedVenueLocation; venueId: string | null }
   | { ok: false; failureReason: 'geocode_failed' | 'ambiguous_address' };
 
-/**
- * Resolves a raw calendar `location` string to a destination, trying the
- * venue directory before ever making a network call, then working through
- * buildSearchQueries' progressively broader queries. Stops at the first
- * stage evaluateVenueCandidates can confidently accept. Never invents a
- * location when nothing can be confidently resolved — returns `ok: false`
- * instead, same as the existing departure-side resolveLocationText.
- */
 async function acceptAndSave(
   parsed: ParsedVenueLocation,
   rawLocation: string,
@@ -233,6 +230,41 @@ async function acceptAndSave(
   return { ok: true, location, venueId };
 }
 
+/**
+ * Nominatim candidate limits for one query string: start narrow (cheap,
+ * fast, usually sufficient), and only widen when the narrow attempt came
+ * back with nothing confidently acceptable AND a bias point exists to
+ * disambiguate a bigger pool with. A venue that's real but ranks outside
+ * Nominatim's own top 3 by raw relevance — the common case for a small,
+ * locally-known venue competing against unrelated same-named businesses —
+ * may still be well within its top 8, and the wider pool still goes
+ * through the exact same confidence gate, never a license to guess.
+ */
+const NARROW_CANDIDATE_LIMIT = 3;
+const WIDE_CANDIDATE_LIMIT = 8;
+
+async function searchNominatim(query: string, bias: GeocodeBias | undefined): Promise<GeocodeResult[]> {
+  const narrow = await geocodeAddress(query, NARROW_CANDIDATE_LIMIT, bias);
+  if (!bias) return narrow;
+  if (evaluateVenueCandidates(narrow, bias).accepted) return narrow;
+
+  const wide = await geocodeAddress(query, WIDE_CANDIDATE_LIMIT, bias);
+  // Prefer the wider result set only when it actually found something the
+  // narrow one didn't — an empty/identical wide response is just wasted
+  // work, not a reason to discard the narrow candidates entirely.
+  return wide.length > narrow.length ? wide : narrow;
+}
+
+/**
+ * Resolves a raw calendar `location` string to a destination, trying the
+ * venue directory before ever making a network call, then working through
+ * buildSearchQueries' progressively broader queries — each one itself
+ * tried at a narrow Nominatim candidate limit first, widened once if that
+ * comes back inconclusive (see searchNominatim). Stops at the first stage
+ * evaluateVenueCandidates can confidently accept. Never invents a location
+ * when nothing can be confidently resolved — returns `ok: false` instead,
+ * same as the existing departure-side resolveLocationText.
+ */
 export async function resolveVenueDestination(
   rawLocation: string,
   bias: GeocodeBias | undefined,
@@ -255,7 +287,7 @@ export async function resolveVenueDestination(
   let sawAnyCandidates = false;
 
   for (const query of queries) {
-    const candidates = await geocodeAddress(query, 3, bias);
+    const candidates = await searchNominatim(query, bias);
     if (candidates.length > 0) sawAnyCandidates = true;
 
     const evaluation = evaluateVenueCandidates(candidates, bias);

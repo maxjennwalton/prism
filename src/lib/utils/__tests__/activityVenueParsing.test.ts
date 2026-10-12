@@ -69,6 +69,56 @@ describe('parseVenueLocation', () => {
       cityProvince: null,
     });
   });
+
+  describe('pipe-separated facility descriptors (real example: soccer calendar export)', () => {
+    it('extracts the street address past a "dash then pipe" facility descriptor, discarding the descriptor as noise', () => {
+      expect(parseVenueLocation('All Around Athletics Centre - Full Facility | 91 Sandford Fleming Dr, Peterborough, ON')).toEqual({
+        venueName: 'All Around Athletics Centre',
+        streetAddress: '91 Sandford Fleming Dr',
+        cityProvince: 'Peterborough, ON',
+      });
+    });
+
+    it('extracts the street address past a comma-only facility descriptor (no pipe), same result', () => {
+      expect(parseVenueLocation('All Around Athletics Centre - Full Facility, 91 Sandford Fleming Dr, Peterborough, ON')).toEqual({
+        venueName: 'All Around Athletics Centre',
+        streetAddress: '91 Sandford Fleming Dr',
+        cityProvince: 'Peterborough, ON',
+      });
+    });
+
+    it('extracts the street address when the facility descriptor is comma-separated with no dash at all', () => {
+      expect(parseVenueLocation('All Around Athletics Centre, Full Facility, 91 Sandford Fleming Dr, Peterborough, ON')).toEqual({
+        venueName: 'All Around Athletics Centre',
+        streetAddress: '91 Sandford Fleming Dr',
+        cityProvince: 'Peterborough, ON',
+      });
+    });
+
+    it('handles a pipe with no preceding dash or facility descriptor', () => {
+      expect(parseVenueLocation('Osprey Community Arena | 95 Osprey Dr, Osprey, ON')).toEqual({
+        venueName: 'Osprey Community Arena',
+        streetAddress: '95 Osprey Dr',
+        cityProvince: 'Osprey, ON',
+      });
+    });
+
+    it('never discards the street address when the facility descriptor is itself multi-word and comma-free', () => {
+      expect(parseVenueLocation('Eddie Bush Arena - Rink 1 Full Facility Rental | 100 First St, Midland, ON')).toEqual({
+        venueName: 'Eddie Bush Arena',
+        streetAddress: '100 First St',
+        cityProvince: 'Midland, ON',
+      });
+    });
+
+    it('still discards the facility descriptor with no address at all, leaving cityProvince null rather than a garbage blob', () => {
+      expect(parseVenueLocation('Eddie Bush Arena - Full Facility | Rink Only Booking')).toEqual({
+        venueName: 'Eddie Bush Arena',
+        streetAddress: null,
+        cityProvince: 'Full Facility, Rink Only Booking',
+      });
+    });
+  });
 });
 
 describe('normalizeVenueName', () => {
@@ -115,5 +165,17 @@ describe('buildSearchQueries', () => {
   it('never produces an empty query list for non-empty input', () => {
     const parsed = parseVenueLocation('Rink B');
     expect(buildSearchQueries(parsed, 'Rink B').length).toBeGreaterThan(0);
+  });
+
+  it('prioritizes the clean street address first for the real soccer example, past its "dash then pipe" facility descriptor', () => {
+    const raw = 'All Around Athletics Centre - Full Facility | 91 Sandford Fleming Dr, Peterborough, ON';
+    const parsed = parseVenueLocation(raw);
+    expect(buildSearchQueries(parsed, raw)).toEqual([
+      '91 Sandford Fleming Dr, Peterborough, ON',
+      '91 Sandford Fleming Dr',
+      'All Around Athletics Centre, Peterborough, ON',
+      'All Around Athletics Centre',
+      raw,
+    ]);
   });
 });

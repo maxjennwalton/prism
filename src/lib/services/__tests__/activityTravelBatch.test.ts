@@ -128,6 +128,7 @@ function listRow(overrides: Record<string, unknown> = {}) {
     eventLocation: 'Rink B',
     eventStart: new Date('2026-10-10T18:00:00.000Z'),
     memberName: 'Beckham',
+    profileName: null,
     profileTravelMinutes: null,
     profileDefaultLocation: null,
     ...overrides,
@@ -310,6 +311,18 @@ describe('listUpcomingActivityTravel', () => {
     mockListSelectChain([listRow({ departureLocationOverride: '42 Side St' })]);
     const [item] = await listUpcomingActivityTravel();
     expect(item?.departureLocationOverride).toBe('42 Side St');
+  });
+
+  it('surfaces the matched Activity Profile\'s own name for the "{profile} — {member}" display', async () => {
+    mockListSelectChain([listRow({ profileName: 'Soccer Game' })]);
+    const [item] = await listUpcomingActivityTravel();
+    expect(item?.profileName).toBe('Soccer Game');
+  });
+
+  it('surfaces a null profileName when no Activity Profile is matched, so the UI falls back to the raw event title', async () => {
+    mockListSelectChain([listRow({ profileName: null })]);
+    const [item] = await listUpcomingActivityTravel();
+    expect(item?.profileName).toBeNull();
   });
 
   it('resolves destination via the same override -> event -> profile precedence used elsewhere', async () => {

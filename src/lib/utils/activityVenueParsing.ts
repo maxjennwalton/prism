@@ -9,11 +9,15 @@
  * text actually contains it. Nothing here invents a city, province, or
  * street number that wasn't in the original string.
  *
- * Handles the two separator conventions seen in real calendar exports:
- *   - dash-separated:  "Eddie Bush Arena - 100 First St, Midland ON"
- *   - comma-separated: "All Around Athletics Centre, 123 Main St, Collingwood, ON"
- *   - bare venue name: "Osprey Community Arena"
- *   - bare address:    "123 Main Street, Collingwood ON"
+ * Handles the separator conventions seen in real calendar exports:
+ *   - dash-separated:   "Eddie Bush Arena - 100 First St, Midland ON"
+ *   - comma-separated:  "All Around Athletics Centre, 123 Main St, Collingwood, ON"
+ *   - pipe-separated:   "All Around Athletics Centre - Full Facility | 91 Sandford Fleming Dr, Peterborough, ON"
+ *                        (dash introduces a facility/room descriptor —
+ *                        "Full Facility" — before the pipe hands off to the
+ *                        actual address; see below)
+ *   - bare venue name:  "Osprey Community Arena"
+ *   - bare address:     "123 Main Street, Collingwood ON"
  */
 
 export interface ParsedVenueLocation {
@@ -25,82 +29,66 @@ export interface ParsedVenueLocation {
 const DASH_SPLIT = /\s+-\s+/;
 const STARTS_WITH_NUMBER = /^\d/;
 
+/** Comma AND pipe both separate parts — a calendar export may use either (or both at once) between a venue/facility descriptor and its address. */
+const PART_SPLIT = /[,|]/;
+
 function splitParts(text: string): string[] {
   return text
-    .split(',')
+    .split(PART_SPLIT)
     .map((part) => part.trim())
     .filter((part) => part.length > 0);
-}
-
-/**
- * Pulls a leading street-address segment and trailing city/province out of
- * a list of comma-separated parts, given that no venue name is already
- * known. The first part is treated as the venue name only when it doesn't
- * look like an address (i.e. doesn't start with a house number).
- */
-function parseCommaParts(parts: string[]): ParsedVenueLocation {
-  if (parts.length === 0) return { venueName: null, streetAddress: null, cityProvince: null };
-
-  const first = parts[0] as string;
-  const rest = parts.slice(1);
-  if (STARTS_WITH_NUMBER.test(first)) {
-    return {
-      venueName: null,
-      streetAddress: first,
-      cityProvince: rest.length > 0 ? rest.join(', ') : null,
-    };
-  }
-
-  if (rest.length === 0) {
-    return { venueName: first, streetAddress: null, cityProvince: null };
-  }
-
-  const second = rest[0] as string;
-  const cityParts = rest.slice(1);
-  if (STARTS_WITH_NUMBER.test(second)) {
-    return {
-      venueName: first,
-      streetAddress: second,
-      cityProvince: cityParts.length > 0 ? cityParts.join(', ') : null,
-    };
-  }
-
-  return { venueName: first, streetAddress: null, cityProvince: rest.join(', ') };
 }
 
 /**
  * Parses a raw calendar location string into venue name / street address /
  * city-province parts. Any part that isn't present in the input is null —
  * callers must not substitute guessed values for a null part.
+ *
+ * Algorithm: an optional leading " - "-separated venue name is pulled off
+ * first; everything after that (or the whole string, if there was no dash)
+ * is split into comma/pipe-delimited parts, and scanned for the first part
+ * that looks like a street address (starts with a house number). Any part
+ * between the venue name and that address — e.g. a facility/room
+ * descriptor like "Full Facility" — is discarded as noise rather than
+ * merged into the city/province, since it was never geocodable in the
+ * first place. When no dash was found and the address isn't the very
+ * first part, the part immediately before the address is treated as the
+ * venue name instead.
  */
 export function parseVenueLocation(raw: string | null | undefined): ParsedVenueLocation {
   const text = (raw ?? '').trim();
   if (!text) return { venueName: null, streetAddress: null, cityProvince: null };
 
   const dashMatch = text.split(DASH_SPLIT);
+  let venueName: string | null = null;
+  let remainderText = text;
   if (dashMatch.length >= 2) {
-    const venueName = (dashMatch[0] as string).trim();
-    const remainder = dashMatch.slice(1).join(' - ').trim();
-    const remainderParts = splitParts(remainder);
-
-    if (remainderParts.length === 0) {
-      return { venueName: venueName || null, streetAddress: null, cityProvince: null };
-    }
-
-    const first = remainderParts[0] as string;
-    const rest = remainderParts.slice(1);
-    if (STARTS_WITH_NUMBER.test(first)) {
-      return {
-        venueName: venueName || null,
-        streetAddress: first,
-        cityProvince: rest.length > 0 ? rest.join(', ') : null,
-      };
-    }
-
-    return { venueName: venueName || null, streetAddress: null, cityProvince: remainderParts.join(', ') };
+    venueName = (dashMatch[0] as string).trim() || null;
+    remainderText = dashMatch.slice(1).join(' - ').trim();
   }
 
-  return parseCommaParts(splitParts(text));
+  const parts = splitParts(remainderText);
+  const addressIndex = parts.findIndex((part) => STARTS_WITH_NUMBER.test(part));
+
+  if (addressIndex === -1) {
+    if (venueName) {
+      return { venueName, streetAddress: null, cityProvince: parts.length > 0 ? parts.join(', ') : null };
+    }
+    if (parts.length === 0) return { venueName: null, streetAddress: null, cityProvince: null };
+    const [first, ...rest] = parts;
+    return { venueName: first as string, streetAddress: null, cityProvince: rest.length > 0 ? rest.join(', ') : null };
+  }
+
+  const streetAddress = parts[addressIndex] as string;
+  const cityProvince = parts.length > addressIndex + 1 ? parts.slice(addressIndex + 1).join(', ') : null;
+
+  if (venueName) return { venueName, streetAddress, cityProvince };
+  if (addressIndex === 0) return { venueName: null, streetAddress, cityProvince };
+
+  // No dash was found, but there's a part before the address — the first
+  // one is the venue name; anything between it and the address (a
+  // facility/room descriptor) is discarded as noise, same as the dash case.
+  return { venueName: parts[0] as string, streetAddress, cityProvince };
 }
 
 /**

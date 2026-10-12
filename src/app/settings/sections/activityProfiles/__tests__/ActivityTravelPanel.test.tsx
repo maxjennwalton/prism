@@ -22,12 +22,14 @@ function item(overrides: Partial<Record<string, unknown>> = {}) {
     eventTitle: 'Hockey Practice',
     eventStart: '2026-10-10T18:00:00.000Z',
     memberName: 'Beckham',
+    profileName: null,
     destination: 'Community Rink',
     departureLocationOverride: null,
     destinationOverrideCoords: null,
     travelMinutesOverride: null,
     travelSource: 'profile_fallback',
     travelMinutes: 20,
+    travelMeta: null,
     ...overrides,
   };
 }
@@ -52,6 +54,30 @@ describe('ActivityTravelPanel', () => {
     expect(screen.getByText(/Hockey Practice — Beckham/)).not.toBeNull();
     expect(screen.getByText(/Community Rink/)).not.toBeNull();
     expect(screen.getByText(/20 min · Profile fallback/)).not.toBeNull();
+  });
+
+  it('shows "{Activity Profile name} — {member}" as the primary title when a profile is matched, with the raw calendar title as secondary text and a tooltip', async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      json: async () => ({ items: [item({ profileName: 'Soccer Game', eventTitle: 'U10 Soccer @ All Around Athletics' })] }),
+    });
+    render(<ActivityTravelPanel />);
+    await flush();
+
+    const title = screen.getByText('Soccer Game — Beckham');
+    expect(title).not.toBeNull();
+    expect(title.getAttribute('title')).toBe('U10 Soccer @ All Around Athletics');
+    expect(screen.getByText('U10 Soccer @ All Around Athletics')).not.toBeNull();
+  });
+
+  it('falls back to the raw calendar event title alone when no Activity Profile is matched', async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      json: async () => ({ items: [item({ profileName: null, eventTitle: 'Unmatched Event' })] }),
+    });
+    render(<ActivityTravelPanel />);
+    await flush();
+    expect(screen.getByText('Unmatched Event — Beckham')).not.toBeNull();
+    // Not duplicated as secondary text when it's already the primary title.
+    expect(screen.getAllByText('Unmatched Event', { exact: false }).length).toBe(1);
   });
 
   it('saves a departure override and does not touch the Home address endpoint', async () => {
@@ -204,6 +230,68 @@ describe('ActivityTravelPanel', () => {
     const call = mockToast.mock.calls.find((c) => c[0].title === 'Travel estimate unavailable');
     expect(call?.[0].description).toMatch(/too far away/i);
     expect(call?.[0].description).not.toContain('implausible_distance');
+  });
+});
+
+describe('ActivityTravelPanel — inline failure diagnostics (requirement: distinguish address lookup failure, ambiguous results, and routing failure without needing a manual refresh)', () => {
+  it('shows a human-readable address-lookup-failure reason inline next to Profile fallback, matching the "Osprey Community Arena" example', async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      json: async () => ({
+        items: [item({
+          destination: 'Osprey Community Arena',
+          travelSource: 'profile_fallback',
+          travelMinutes: 15,
+          travelMeta: { status: 'unavailable', failureReason: 'destination_geocode_failed' },
+        })],
+      }),
+    });
+    render(<ActivityTravelPanel />);
+    await flush();
+
+    expect(screen.getByText(/15 min · Profile fallback/)).not.toBeNull();
+    expect(screen.getByText(/Could not find the destination address/i)).not.toBeNull();
+  });
+
+  it('distinguishes an ambiguous-results failure from an address-lookup failure inline', async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      json: async () => ({
+        items: [item({ travelMeta: { status: 'unavailable', failureReason: 'destination_ambiguous_address' } })],
+      }),
+    });
+    render(<ActivityTravelPanel />);
+    await flush();
+    expect(screen.getByText(/destination address is ambiguous/i)).not.toBeNull();
+  });
+
+  it('distinguishes a routing-provider failure from either address-side failure inline', async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      json: async () => ({
+        items: [item({ travelMeta: { status: 'unavailable', failureReason: 'provider_timeout' } })],
+      }),
+    });
+    render(<ActivityTravelPanel />);
+    await flush();
+    expect(screen.getByText(/routing service timed out/i)).not.toBeNull();
+  });
+
+  it('shows no inline diagnostic at all when the last attempt succeeded', async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      json: async () => ({
+        items: [item({ travelSource: 'calculated', travelMeta: { status: 'ok', failureReason: null } })],
+      }),
+    });
+    render(<ActivityTravelPanel />);
+    await flush();
+    expect(screen.queryByText(/could not find|ambiguous|timed out|too far away/i)).toBeNull();
+  });
+
+  it('shows no inline diagnostic when there has never been an attempt at all (travelMeta null)', async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      json: async () => ({ items: [item({ travelMeta: null })] }),
+    });
+    render(<ActivityTravelPanel />);
+    await flush();
+    expect(screen.queryByText(/could not find|ambiguous|timed out|too far away/i)).toBeNull();
   });
 });
 

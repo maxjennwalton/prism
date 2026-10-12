@@ -388,6 +388,8 @@ export interface ActivityTravelListItem {
   eventTitle: string;
   eventStart: Date;
   memberName: string | null;
+  /** The matched Activity Profile's own name (e.g. "Soccer Game"), null when no profile is matched — see ActivityTravelPanel's "{profile} — {member}" display. */
+  profileName: string | null;
   /** Effective destination text (locationOverride -> event.location -> profile.defaultLocation -> null). */
   destination: string | null;
   /** Raw per-event departure override, if any — null means "depart from Home". */
@@ -426,6 +428,7 @@ export async function listUpcomingActivityTravel(
       eventLocation: events.location,
       eventStart: events.startTime,
       memberName: users.name,
+      profileName: activityProfiles.name,
       profileTravelMinutes: activityProfiles.travelMinutes,
       profileDefaultLocation: activityProfiles.defaultLocation,
     })
@@ -458,6 +461,7 @@ export async function listUpcomingActivityTravel(
       eventTitle: r.eventTitle,
       eventStart: r.eventStart,
       memberName: r.memberName,
+      profileName: r.profileName,
       destination,
       departureLocationOverride: r.departureLocationOverride,
       destinationOverrideCoords: r.destinationOverrideCoords,

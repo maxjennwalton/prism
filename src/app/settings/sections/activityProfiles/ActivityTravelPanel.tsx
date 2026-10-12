@@ -20,12 +20,16 @@ interface UpcomingTravelItem {
   eventTitle: string;
   eventStart: string;
   memberName: string | null;
+  /** The matched Activity Profile's own name (e.g. "Soccer Game") — null when no profile is matched, in which case the raw eventTitle is shown instead. */
+  profileName: string | null;
   destination: string | null;
   departureLocationOverride: string | null;
   destinationOverrideCoords: DestinationPin | null;
   travelMinutesOverride: number | null;
   travelSource: ActivityTravelSource;
   travelMinutes: number | null;
+  /** The last calculation attempt, if any — used to surface *why* a link is showing "Profile fallback"/"Travel time needed" instead of a real estimate (requirement: distinguish address lookup failure, ambiguous results, and routing failure inline, not just in the manual-refresh toast). */
+  travelMeta: { status: 'ok' | 'unavailable'; failureReason: string | null } | null;
 }
 
 interface GeocodeCandidate {
@@ -269,16 +273,22 @@ export function ActivityTravelPanel() {
           <div key={item.linkId} className="rounded-md border p-3 space-y-2">
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
-                <div className="font-medium truncate">
-                  {item.eventTitle}
+                <div className="font-medium truncate" title={item.eventTitle}>
+                  {item.profileName ?? item.eventTitle}
                   {item.memberName ? ` — ${item.memberName}` : ''}
                 </div>
+                {item.profileName && (
+                  <div className="text-xs text-muted-foreground/70 truncate italic">{item.eventTitle}</div>
+                )}
                 <div className="text-xs text-muted-foreground truncate">
                   {formatEventTime(item.eventStart)} · {item.destination ?? 'No destination set'}
                 </div>
               </div>
-              <div className="text-right text-xs text-muted-foreground shrink-0">
-                {travelLabel(item.travelMinutes, item.travelSource)}
+              <div className="text-right text-xs text-muted-foreground shrink-0 max-w-[12rem]">
+                <div>{travelLabel(item.travelMinutes, item.travelSource)}</div>
+                {item.travelMeta?.status === 'unavailable' && (
+                  <div className="text-destructive/80">{describeFailure(item.travelMeta.failureReason)}</div>
+                )}
               </div>
             </div>
             <div className="flex items-center gap-2">

@@ -298,3 +298,131 @@ describe('resolveVenueDestination', () => {
     expect(mockInsert).not.toHaveBeenCalled();
   });
 });
+
+describe('resolveVenueDestination — narrow-then-wide progressive geographic search (real example: bare venue name)', () => {
+  const HOME_BIAS = { lat: 44.5, lon: -80.2 };
+
+  it('widens to a larger Nominatim pool when the narrow (limit 3) attempt is ambiguous, and accepts a confident match found only in the wider set', async () => {
+    mockSelect.mockReturnValueOnce(selectWhere([])); // findVenueByName exact
+    mockSelect.mockReturnValueOnce(selectAll([])); // findVenueByName alias scan
+
+    const farA = { placeId: 1, displayName: 'Community Arena', fullName: 'Community Arena, Townsville', latitude: 10, longitude: 10, importance: 0.1 };
+    const farB = { placeId: 2, displayName: 'Community Arena', fullName: 'Community Arena, Otherville', latitude: 10.0001, longitude: 10.0001, importance: 0.09 };
+    const nearHome = { placeId: 3, displayName: 'Osprey Community Arena', fullName: 'Osprey Community Arena, Osprey, ON, Canada', latitude: 44.5005, longitude: -80.2005, importance: 0.05 };
+
+    mockGeocodeAddress.mockResolvedValueOnce([farA, farB]); // narrow: ambiguous, neither near Home
+    mockGeocodeAddress.mockResolvedValueOnce([farA, farB, nearHome]); // wide: the real match shows up
+
+    mockSelect.mockReturnValueOnce(selectWhere([])); // upsertVenue's own lookup
+    const values = jest.fn().mockReturnValue({ returning: () => [dbRow({ id: 'venue-osprey', displayName: 'Osprey Community Arena' })] });
+    mockInsert.mockReturnValue({ values });
+
+    const result = await resolveVenueDestination('Osprey Community Arena', HOME_BIAS);
+
+    expect(mockGeocodeAddress).toHaveBeenNthCalledWith(1, 'Osprey Community Arena', 3, HOME_BIAS);
+    expect(mockGeocodeAddress).toHaveBeenNthCalledWith(2, 'Osprey Community Arena', 8, HOME_BIAS);
+    expect(result).toEqual({
+      ok: true,
+      venueId: 'venue-osprey',
+      location: { address: 'Osprey Community Arena', lat: 44.5005, lon: -80.2005 },
+    });
+  });
+
+  it('never makes a second (wide) call when the narrow attempt already confidently accepts a unique candidate', async () => {
+    mockSelect.mockReturnValueOnce(selectWhere([]));
+    mockSelect.mockReturnValueOnce(selectAll([]));
+    mockGeocodeAddress.mockResolvedValueOnce([
+      { placeId: 1, displayName: 'Osprey Community Arena', fullName: 'Osprey Community Arena, Osprey, ON', latitude: 44.5005, longitude: -80.2005, importance: 0.05 },
+    ]);
+    mockSelect.mockReturnValueOnce(selectWhere([]));
+    mockInsert.mockReturnValue({ values: jest.fn().mockReturnValue({ returning: () => [dbRow({ id: 'venue-osprey' })] }) });
+
+    await resolveVenueDestination('Osprey Community Arena', HOME_BIAS);
+
+    expect(mockGeocodeAddress).toHaveBeenCalledTimes(1);
+  });
+
+  it('never widens when there is no bias point to disambiguate a bigger pool with, even on an ambiguous narrow result', async () => {
+    mockSelect.mockReturnValueOnce(selectWhere([]));
+    mockSelect.mockReturnValueOnce(selectAll([]));
+    mockGeocodeAddress.mockResolvedValueOnce([
+      { placeId: 1, displayName: 'A', fullName: 'A', latitude: 1, longitude: 1, importance: 0.1 },
+      { placeId: 2, displayName: 'B', fullName: 'B', latitude: 1.0001, longitude: 1.0001, importance: 0.09 },
+    ]);
+
+    const result = await resolveVenueDestination('Osprey Community Arena', undefined);
+
+    expect(mockGeocodeAddress).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ ok: false, failureReason: 'ambiguous_address' });
+  });
+
+  it('falls back to the narrow result when the wider call finds nothing new (no point discarding real candidates)', async () => {
+    mockSelect.mockReturnValueOnce(selectWhere([]));
+    mockSelect.mockReturnValueOnce(selectAll([]));
+    const ambiguousPair = [
+      { placeId: 1, displayName: 'A', fullName: 'A', latitude: 1, longitude: 1, importance: 0.1 },
+      { placeId: 2, displayName: 'B', fullName: 'B', latitude: 1.0001, longitude: 1.0001, importance: 0.09 },
+    ];
+    mockGeocodeAddress.mockResolvedValueOnce(ambiguousPair); // narrow
+    mockGeocodeAddress.mockResolvedValueOnce(ambiguousPair); // wide: identical, nothing new
+
+    const result = await resolveVenueDestination('Osprey Community Arena', HOME_BIAS);
+
+    expect(mockGeocodeAddress).toHaveBeenCalledTimes(2);
+    expect(result).toEqual({ ok: false, failureReason: 'ambiguous_address' });
+  });
+
+  it('does not widen the Google Places last-resort stage — only the free Nominatim stages widen', async () => {
+    // No saved venue, Nominatim never resolves it at either limit.
+    mockSelect.mockReturnValueOnce(selectWhere([]));
+    mockSelect.mockReturnValueOnce(selectAll([]));
+    mockGeocodeAddress.mockResolvedValue([]);
+
+    const result = await resolveVenueDestination('Osprey Community Arena', HOME_BIAS);
+
+    // Narrow + wide for the single venue-name-only query, nothing more —
+    // Google Places itself isn't configured in this test env, so it's
+    // never reached at all, let alone widened.
+    expect(mockGeocodeAddress).toHaveBeenCalledTimes(2);
+    expect(result).toEqual({ ok: false, failureReason: 'geocode_failed' });
+  });
+});
+
+describe('resolveVenueDestination — recurring events reuse a saved match (requirement: directory reuse across occurrences)', () => {
+  it('geocodes once for the first occurrence, then resolves a second occurrence at the same venue with zero geocoding calls', async () => {
+    const HOME_BIAS = { lat: 44.5, lon: -80.2 };
+
+    // First occurrence: no saved venue yet, resolves via the wide Nominatim pool, and gets saved.
+    mockSelect.mockReturnValueOnce(selectWhere([])); // findVenueByName exact
+    mockSelect.mockReturnValueOnce(selectAll([])); // findVenueByName alias scan
+    mockGeocodeAddress.mockResolvedValueOnce([
+      { placeId: 1, displayName: 'Decoy', fullName: 'Decoy', latitude: 10, longitude: 10, importance: 0.1 },
+      { placeId: 2, displayName: 'Decoy 2', fullName: 'Decoy 2', latitude: 10.0001, longitude: 10.0001, importance: 0.09 },
+    ]);
+    mockGeocodeAddress.mockResolvedValueOnce([
+      { placeId: 1, displayName: 'Decoy', fullName: 'Decoy', latitude: 10, longitude: 10, importance: 0.1 },
+      { placeId: 2, displayName: 'Decoy 2', fullName: 'Decoy 2', latitude: 10.0001, longitude: 10.0001, importance: 0.09 },
+      { placeId: 3, displayName: 'Osprey Community Arena', fullName: 'Osprey Community Arena, Osprey, ON', latitude: 44.5005, longitude: -80.2005, importance: 0.05 },
+    ]);
+    mockSelect.mockReturnValueOnce(selectWhere([])); // upsertVenue's own lookup — nothing yet
+    const savedVenue = dbRow({ id: 'venue-osprey', normalizedName: 'osprey community arena', displayName: 'Osprey Community Arena', formattedAddress: 'Osprey Community Arena, Osprey, ON', latitude: '44.500500', longitude: '-80.200500' });
+    mockInsert.mockReturnValue({ values: jest.fn().mockReturnValue({ returning: () => [savedVenue] }) });
+
+    const firstOccurrence = await resolveVenueDestination('Osprey Community Arena', HOME_BIAS);
+    expect(firstOccurrence.ok).toBe(true);
+    expect(mockGeocodeAddress).toHaveBeenCalledTimes(2);
+
+    // Second occurrence (next week's recurring practice): the directory now has it.
+    jest.clearAllMocks();
+    mockSelect.mockReturnValueOnce(selectWhere([savedVenue]));
+
+    const secondOccurrence = await resolveVenueDestination('Osprey Community Arena', HOME_BIAS);
+
+    expect(mockGeocodeAddress).not.toHaveBeenCalled();
+    expect(secondOccurrence).toEqual({
+      ok: true,
+      venueId: 'venue-osprey',
+      location: { address: 'Osprey Community Arena, Osprey, ON', lat: 44.5005, lon: -80.2005 },
+    });
+  });
+});
