@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
 import { travelSourceLabel, type ActivityTravelSource } from '@/lib/utils/activityTravelResolution';
+import { parseVenueLocation } from '@/lib/utils/activityVenueParsing';
 
 interface DestinationPin {
   address: string;
@@ -82,9 +83,16 @@ function describeFailure(failureReason: string | null): string {
  * an ambiguous or wrongly-matched address (e.g. the HTTP 400 "route
  * distance too large" case) stick permanently, not just until the next
  * recompute re-derives the same wrong match from the same text.
+ *
+ * Doubles as the "Fix Destination" action for a Weekly Review issue
+ * (requirement 9): the search box starts pre-filled with the venue name
+ * parsed out of the item's own unresolved destination text (see
+ * activityVenueParsing.ts) rather than empty, so a parent fixing "Eddie
+ * Bush Arena - 100 First St, Midland ON" doesn't have to retype the venue
+ * name — they can just pick the right search result.
  */
 function DestinationPicker({ item, onSaved }: { item: UpcomingTravelItem; onSaved: () => void }) {
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(() => parseVenueLocation(item.destination).venueName ?? '');
   const [results, setResults] = useState<GeocodeCandidate[]>([]);
   const [searching, setSearching] = useState(false);
   const [saving, setSaving] = useState(false);

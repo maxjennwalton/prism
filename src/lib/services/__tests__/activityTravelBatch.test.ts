@@ -54,6 +54,22 @@ jest.mock('@/lib/integrations/routing', () => ({
 const mockGetHomeAddress = jest.fn();
 jest.mock('@/lib/services/homeAddress', () => ({ getHomeAddress: (...a: unknown[]) => mockGetHomeAddress(...a) }));
 
+// The venue directory's own DB-touching behavior (findVenueByName,
+// upsertVenue) is unit-tested in activityVenues.test.ts. Here it's mocked
+// with a passthrough reproducing the old single-geocode-call destination
+// resolution exactly, since this file's own DB mock chain (mockSelectChain
+// below) is shaped for activityEventLinks queries, not the venue table's.
+const mockResolveVenueDestination = jest.fn(async (text: string, bias: unknown, _executor?: unknown) => {
+  const candidates = await mockGeocodeAddress(text, 3, bias);
+  if (candidates.length === 0) return { ok: false, failureReason: 'geocode_failed' };
+  if (isAmbiguousGeocodeMatch(candidates)) return { ok: false, failureReason: 'ambiguous_address' };
+  const top = candidates[0];
+  return { ok: true, location: { address: text, lat: top.latitude, lon: top.longitude }, venueId: null };
+});
+jest.mock('@/lib/services/activityVenues', () => ({
+  resolveVenueDestination: (...a: [string, unknown, unknown]) => mockResolveVenueDestination(...a),
+}));
+
 import {
   recomputeActivityTravelForUpcoming,
   recomputeActivityTravelForLink,
@@ -61,6 +77,7 @@ import {
   setActivityDepartureOverride,
   setActivityDestinationOverride,
 } from '../activityTravel';
+import { isAmbiguousGeocodeMatch } from '@/lib/utils/activityTravelResolution';
 
 const HOME = { address: '1 Home Way', lat: 40, lon: -75 };
 

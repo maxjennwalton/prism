@@ -2725,6 +2725,26 @@ CREATE UNIQUE INDEX IF NOT EXISTS activity_event_links_event_id_idx ON public.ac
 CREATE INDEX IF NOT EXISTS activity_event_links_profile_idx ON public.activity_event_links (activity_profile_id);
 CREATE INDEX IF NOT EXISTS activity_event_links_match_status_idx ON public.activity_event_links (match_status);
 
+-- Phase 4B (see drizzle/0031_activity_venues.sql): shared venue directory.
+-- normalized_name is deliberately NOT unique — two towns can each have their
+-- own "Community Arena"; lookup disambiguates by proximity to Home, not name.
+CREATE TABLE IF NOT EXISTS public.activity_venues (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  normalized_name varchar(255) NOT NULL,
+  display_name varchar(255) NOT NULL,
+  aliases jsonb DEFAULT '[]'::jsonb NOT NULL,
+  formatted_address text,
+  latitude decimal(9, 6) NOT NULL,
+  longitude decimal(10, 6) NOT NULL,
+  source varchar(20) NOT NULL,
+  verified boolean DEFAULT false NOT NULL,
+  created_at timestamp DEFAULT now() NOT NULL,
+  updated_at timestamp DEFAULT now() NOT NULL,
+  CONSTRAINT activity_venues_source_check
+    CHECK (source IN ('nominatim', 'google_places', 'parent_confirmed'))
+);
+CREATE INDEX IF NOT EXISTS activity_venues_normalized_name_idx ON public.activity_venues (normalized_name);
+
 CREATE TABLE IF NOT EXISTS public.activity_gear_completions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   activity_event_link_id uuid NOT NULL REFERENCES public.activity_event_links(id) ON DELETE CASCADE,

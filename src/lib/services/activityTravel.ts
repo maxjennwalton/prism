@@ -1,9 +1,17 @@
 /**
  * Phase 4B (Automatic Travel): computes one activity occurrence's driving
- * estimate. Pure with respect to the database — takes already-loaded
- * inputs and returns the ActivityTravelMeta to persist (or null when there
- * is nothing to compute), so it's testable without a DB and reusable from
- * both the batch cron recompute and the manual single-link refresh route.
+ * estimate. Takes already-loaded inputs (so it's still reusable from both
+ * the batch cron recompute and the manual single-link refresh route without
+ * either caller re-deriving them), and returns the ActivityTravelMeta to
+ * persist (or null when there is nothing to compute).
+ *
+ * The destination side resolves through the venue directory (see
+ * resolveVenueDestination in activityVenues.ts) rather than a bare geocode
+ * call — it's no longer DB-free, hence the `executor` parameter — so a
+ * previously-confirmed venue resolves with zero network calls, and a fresh
+ * confident match gets saved for every future event at the same place. The
+ * departure side is untouched: resolveLocationText below still governs
+ * Home/departure-override resolution directly against Nominatim.
  *
  * Precedence/skip rules this function enforces:
  *  - A manual travelMinutesOverride always wins at display time (see
@@ -45,6 +53,7 @@ import {
   type ActivityTravelMeta,
 } from '@/lib/db/schema';
 import { getHomeAddress } from '@/lib/services/homeAddress';
+import { resolveVenueDestination } from '@/lib/services/activityVenues';
 
 const REFRESH_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -118,7 +127,10 @@ function failureMeta(failureReason: string, departureInputHash: string, destinat
  * there is nothing meaningful to compute (manual override set, or an
  * input required even to attempt a calculation is missing entirely).
  */
-export async function computeActivityTravel(input: ActivityTravelComputationInput): Promise<ActivityTravelMeta | null> {
+export async function computeActivityTravel(
+  input: ActivityTravelComputationInput,
+  executor: DbExecutor = db,
+): Promise<ActivityTravelMeta | null> {
   if (input.travelMinutesOverride !== null && input.travelMinutesOverride !== undefined) {
     return null;
   }
@@ -147,7 +159,7 @@ export async function computeActivityTravel(input: ActivityTravelComputationInpu
   const departureHash = hashTravelLocation(departureResolution.location);
   const destinationResolution: LocationResolution = input.destinationOverrideCoords
     ? { ok: true, location: { ...input.destinationOverrideCoords } }
-    : await resolveLocationText(destinationText, homeBias);
+    : await resolveVenueDestination(destinationText, homeBias, executor);
 
   if (!destinationResolution.ok) {
     return failureMeta(`destination_${destinationResolution.failureReason}`, departureHash, destinationInputHashFallback);
@@ -289,7 +301,7 @@ export async function recomputeActivityTravelForUpcoming(
       destinationOverrideCoords: row.destinationOverrideCoords,
       home,
       existingTravelMeta: row.travelMeta,
-    });
+    }, executor);
 
     if (result === null) {
       summary.skipped += 1;
@@ -358,7 +370,7 @@ export async function recomputeActivityTravelForLink(
     home,
     existingTravelMeta: row.travelMeta,
     forceRefresh: true,
-  });
+  }, executor);
 
   if (result !== null && result !== row.travelMeta) {
     await executor

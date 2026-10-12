@@ -97,7 +97,7 @@ describe('detectWeeklyReviewIssues', () => {
     it('flags a needs_review link', async () => {
       mockSelectChain([row({ matchStatus: 'needs_review' })]);
       const issues = await detectWeeklyReviewIssues();
-      expect(issues).toEqual([{ type: 'unreviewed_match', linkId: 'link-1', eventId: 'event-1', eventTitle: 'Hockey Practice', eventStart: row().eventStart, memberName: 'Beckham', detail: null }]);
+      expect(issues).toEqual([{ type: 'unreviewed_match', linkId: 'link-1', eventId: 'event-1', eventTitle: 'Hockey Practice', eventStart: row().eventStart, memberName: 'Beckham', detail: null, originalLocation: 'Rink B' }]);
     });
 
     it('takes priority over a missing destination on the same row', async () => {
@@ -193,5 +193,35 @@ describe('detectWeeklyReviewIssues', () => {
     mockSelectChain([row({ matchStatus: null, eventLocation: null, profileDefaultLocation: null })]);
     const [issue] = await detectWeeklyReviewIssues();
     expect(issue?.type).toBe('missing_destination');
+  });
+
+  describe('originalLocation — the raw text a Fix Destination action shows/searches from', () => {
+    it('is null for missing_destination, since there is no text to show at all', async () => {
+      mockSelectChain([row({ eventLocation: null, profileDefaultLocation: null })]);
+      const [issue] = await detectWeeklyReviewIssues();
+      expect(issue).toMatchObject({ type: 'missing_destination', originalLocation: null });
+    });
+
+    it('is the raw calendar event.location for an ambiguous_address issue', async () => {
+      mockSelectChain([row({
+        eventLocation: 'Eddie Bush Arena - 100 First St, Midland ON',
+        travelMeta: { status: 'unavailable', minutes: null, provider: 'none', calculatedAt: 'x', distanceMeters: null, durationSeconds: null, departureInputHash: 'a', destinationInputHash: 'b', failureReason: 'destination_ambiguous_address' },
+      })]);
+      const [issue] = await detectWeeklyReviewIssues();
+      expect(issue).toMatchObject({ type: 'ambiguous_address', originalLocation: 'Eddie Bush Arena - 100 First St, Midland ON' });
+    });
+
+    it('prefers locationOverride text over the calendar event location, same precedence as the resolved destination', async () => {
+      mockGetHomeAddress.mockResolvedValue(null);
+      mockSelectChain([row({ locationOverride: 'Corrected Venue Name', eventLocation: 'Calendar Text' })]);
+      const [issue] = await detectWeeklyReviewIssues();
+      expect(issue).toMatchObject({ type: 'missing_departure', originalLocation: 'Corrected Venue Name' });
+    });
+
+    it('is populated even on an unreviewed_match issue so Fix Destination has something to show before review', async () => {
+      mockSelectChain([row({ matchStatus: 'needs_review', eventLocation: 'Osprey Community Arena' })]);
+      const [issue] = await detectWeeklyReviewIssues();
+      expect(issue).toMatchObject({ type: 'unreviewed_match', originalLocation: 'Osprey Community Arena' });
+    });
   });
 });

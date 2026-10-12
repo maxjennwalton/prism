@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { withAuth } from '@/lib/api/withAuth';
 import { setActivityDestinationOverride, recomputeActivityTravelForLink } from '@/lib/services/activityTravel';
+import { upsertVenue } from '@/lib/services/activityVenues';
+import { parseVenueLocation } from '@/lib/utils/activityVenueParsing';
 import { logError } from '@/lib/utils/logError';
 import type { ActivityDestinationOverride } from '@/lib/db/schema';
 
@@ -22,6 +24,37 @@ function parseDestination(body: unknown): ActivityDestinationOverride | null | '
 }
 
 /**
+ * Saves a parent's confirmed pick to the shared venue directory (source:
+ * 'parent_confirmed', verified) so every other event at the same place —
+ * a recurring practice, a different sibling's game — resolves from the
+ * directory from now on instead of repeating whatever geocoding mismatch
+ * this correction just fixed. The venue name is parsed from the picked
+ * candidate's own address text (it's typically the OSM POI name followed
+ * by its address, e.g. "Eddie Bush Arena, 100 First St, Midland, ON,
+ * Canada") rather than the raw calendar text, so this needs no extra
+ * lookup of the event itself. Best-effort: a failure here must never
+ * block the pin save that the parent is actually waiting on.
+ */
+async function saveAsVerifiedVenue(destination: ActivityDestinationOverride): Promise<void> {
+  const parsed = parseVenueLocation(destination.address);
+  if (!parsed.venueName) return;
+
+  try {
+    await upsertVenue({
+      venueName: parsed.venueName,
+      alias: destination.address,
+      formattedAddress: destination.address,
+      lat: destination.lat,
+      lon: destination.lon,
+      source: 'parent_confirmed',
+      verified: true,
+    });
+  } catch (error) {
+    logError('Error saving parent-confirmed venue to the directory:', error);
+  }
+}
+
+/**
  * POST /api/activity-matching/links/[id]/destination
  *
  * Phase 4B requirement 6: lets a parent select and save the correct
@@ -32,7 +65,11 @@ function parseDestination(body: unknown): ActivityDestinationOverride | null | '
  * locationOverride/event.location/profile default resolved as text).
  *
  * Immediately triggers a forced recompute so the UI reflects the
- * correction right away rather than waiting for the next cron tick.
+ * correction right away rather than waiting for the next cron tick. A
+ * real (non-null) pin is also saved to the shared venue directory — see
+ * saveAsVerifiedVenue — satisfying the requirement that a parent's
+ * correction benefit every future event at the same venue, not just this
+ * one occurrence.
  */
 export async function POST(request: Request, { params }: RouteParams) {
   return withAuth(async () => {
@@ -49,6 +86,8 @@ export async function POST(request: Request, { params }: RouteParams) {
       }
 
       await setActivityDestinationOverride(id, destination);
+      if (destination) await saveAsVerifiedVenue(destination);
+
       const { found, travelMeta } = await recomputeActivityTravelForLink(id);
       if (!found) {
         return NextResponse.json({ error: 'Activity link not found' }, { status: 404 });

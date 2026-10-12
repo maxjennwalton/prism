@@ -1994,6 +1994,57 @@ export interface ActivityDestinationOverride {
   lon: number;
 }
 
+/**
+ * A shared venue directory: once any activity's destination is resolved
+ * with real confidence (auto-resolved past the confidence gate, or a
+ * parent's explicit correction), it's saved here so every future event at
+ * the same place — a recurring weekly practice, a different sibling's
+ * game, a different season — resolves instantly from this table with no
+ * geocoding call at all. See src/lib/services/activityVenues.ts.
+ *
+ * Multiple rows can legitimately share a normalizedName (two different
+ * towns each with their own "Community Arena") — lookup disambiguates by
+ * proximity to the searching household's own Home, not by uniqueness.
+ */
+export const activityVenues = pgTable('activity_venues', {
+  id: uuid('id').defaultRandom().primaryKey(),
+
+  // Lowercased, punctuation-stripped form of the venue's own name (never
+  // the full address) — see normalizeVenueName in activityVenueParsing.ts.
+  // The lookup key; not unique, see doc comment above.
+  normalizedName: varchar('normalized_name', { length: 255 }).notNull(),
+
+  // Human-facing canonical name, e.g. "Osprey Community Arena".
+  displayName: varchar('display_name', { length: 255 }).notNull(),
+
+  // Alternate raw calendar-location strings that have matched this same
+  // venue over time (e.g. "Osprey Arena", "Osprey Comm. Arena - 95 Osprey
+  // Dr") — grows as new matches land on this row; never deduplicated away,
+  // only ever appended to.
+  aliases: jsonb('aliases').$type<string[]>().default([]).notNull(),
+
+  formattedAddress: text('formatted_address'),
+
+  latitude: decimal('latitude', { precision: 9, scale: 6 }).notNull(),
+  longitude: decimal('longitude', { precision: 10, scale: 6 }).notNull(),
+
+  // Where these coordinates came from — informational/diagnostic only;
+  // every row here already passed the confidence gate at creation time,
+  // so none of these sources is trusted more than another on lookup.
+  source: varchar('source', { length: 20 }).$type<'nominatim' | 'google_places' | 'parent_confirmed'>().notNull(),
+
+  // True only for a parent_confirmed row — a human explicitly picked this
+  // exact venue once. Informational provenance, not a lookup gate.
+  verified: boolean('verified').default(false).notNull(),
+
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+}, (table) => ({
+  normalizedNameIdx: index('activity_venues_normalized_name_idx').on(table.normalizedName),
+}));
+
+export type ActivityVenueSource = 'nominatim' | 'google_places' | 'parent_confirmed';
+
 export const activityProfiles = pgTable('activity_profiles', {
   id: uuid('id').defaultRandom().primaryKey(),
 

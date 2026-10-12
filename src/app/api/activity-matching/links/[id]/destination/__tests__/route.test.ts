@@ -12,6 +12,11 @@ jest.mock('@/lib/services/activityTravel', () => ({
   recomputeActivityTravelForLink: (...a: unknown[]) => mockRecompute(...a),
 }));
 
+const mockUpsertVenue = jest.fn();
+jest.mock('@/lib/services/activityVenues', () => ({
+  upsertVenue: (...a: unknown[]) => mockUpsertVenue(...a),
+}));
+
 jest.mock('@/lib/utils/logError', () => ({ logError: jest.fn() }));
 
 import { POST } from '../route';
@@ -28,6 +33,7 @@ function call(id: string, body: unknown) {
 beforeEach(() => {
   jest.clearAllMocks();
   mockSetOverride.mockResolvedValue(undefined);
+  mockUpsertVenue.mockResolvedValue({ id: 'venue-1' });
 });
 
 describe('POST /api/activity-matching/links/[id]/destination', () => {
@@ -111,5 +117,49 @@ describe('POST /api/activity-matching/links/[id]/destination', () => {
 
     const res = await call('link-1', { destination: CANDIDATE });
     expect(res.status).toBe(500);
+  });
+});
+
+describe('POST /api/activity-matching/links/[id]/destination — permanent venue correction (requirement 7)', () => {
+  beforeEach(() => {
+    mockRequireAuth.mockResolvedValue(parentAuth);
+    mockRequireRole.mockReturnValue(null);
+    mockRecompute.mockResolvedValue({ found: true, travelMeta: null });
+  });
+
+  it('saves a confirmed pick to the venue directory as parent_confirmed and verified', async () => {
+    await call('link-1', { destination: CANDIDATE });
+
+    expect(mockUpsertVenue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        venueName: 'All Around Athletics Centre',
+        alias: CANDIDATE.address,
+        formattedAddress: CANDIDATE.address,
+        lat: CANDIDATE.lat,
+        lon: CANDIDATE.lon,
+        source: 'parent_confirmed',
+        verified: true,
+      }),
+    );
+  });
+
+  it('never saves to the venue directory when clearing a pin (destination: null)', async () => {
+    await call('link-1', { destination: null });
+    expect(mockUpsertVenue).not.toHaveBeenCalled();
+  });
+
+  it('never saves to the venue directory when the picked address has no parseable venue name', async () => {
+    const bareAddress = { address: '123 Main Street, Collingwood, ON', lat: 44.5, lon: -80.2 };
+    await call('link-1', { destination: bareAddress });
+    expect(mockUpsertVenue).not.toHaveBeenCalled();
+  });
+
+  it('still saves the destination pin and returns 200 even when the venue-directory write fails', async () => {
+    mockUpsertVenue.mockRejectedValue(new Error('db unavailable'));
+
+    const res = await call('link-1', { destination: CANDIDATE });
+
+    expect(res.status).toBe(200);
+    expect(mockSetOverride).toHaveBeenCalledWith('link-1', CANDIDATE);
   });
 });

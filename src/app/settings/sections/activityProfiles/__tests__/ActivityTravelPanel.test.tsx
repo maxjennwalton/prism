@@ -223,6 +223,24 @@ describe('ActivityTravelPanel — destination correction (requirement 6: select 
     expect(screen.getByPlaceholderText(/fix destination/i)).not.toBeNull();
   });
 
+  it('pre-fills the search box with the venue name parsed from the unresolved destination text (requirement 9: Fix Destination)', async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      json: async () => ({ items: [item({ destination: 'Eddie Bush Arena - 100 First St, Midland ON' })] }),
+    });
+    render(<ActivityTravelPanel />);
+    await flush();
+    expect((screen.getByPlaceholderText(/fix destination/i) as HTMLInputElement).value).toBe('Eddie Bush Arena');
+  });
+
+  it('leaves the search box empty when the destination has no parseable venue name', async () => {
+    (global.fetch as jest.Mock).mockResolvedValueOnce({
+      json: async () => ({ items: [item({ destination: '123 Main Street, Collingwood ON' })] }),
+    });
+    render(<ActivityTravelPanel />);
+    await flush();
+    expect((screen.getByPlaceholderText(/fix destination/i) as HTMLInputElement).value).toBe('');
+  });
+
   it('shows the pinned address with a clear control when a destination pin is set, not the search box', async () => {
     const pin = { address: 'All Around Athletics Centre, 91 Sandford Fleming Dr', lat: 40.1, lon: -75.1 };
     (global.fetch as jest.Mock).mockResolvedValueOnce({ json: async () => ({ items: [item({ destinationOverrideCoords: pin })] }) });

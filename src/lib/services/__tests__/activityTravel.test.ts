@@ -2,6 +2,16 @@
  * Tests for computeActivityTravel — the Phase 4B travel calculation core.
  * Mocks geocodeAddress and the routing provider so this exercises only the
  * precedence/skip/staleness logic, not real network calls.
+ *
+ * The destination side now resolves through resolveVenueDestination (see
+ * activityVenues.ts) rather than a bare geocode call — that module's own
+ * venue-directory/progressive-search behavior is unit-tested in
+ * activityVenues.test.ts, so here it's mocked with a passthrough that
+ * reproduces the old single-geocode-call behavior exactly, keeping every
+ * assertion below about geocodeAddress call args/counts valid unchanged.
+ * A dedicated "venue directory wiring" block separately confirms
+ * computeActivityTravel actually calls resolveVenueDestination with the
+ * right text/bias/executor.
  */
 const mockGeocodeAddress = jest.fn();
 jest.mock('@/lib/integrations/geocode', () => ({
@@ -15,7 +25,26 @@ jest.mock('@/lib/integrations/routing', () => ({
 
 import { computeActivityTravel, type ActivityTravelComputationInput } from '../activityTravel';
 import type { ActivityTravelMeta } from '@/lib/db/schema';
-import { hashTravelLocation, hashTravelText } from '@/lib/utils/activityTravelResolution';
+import { hashTravelLocation, hashTravelText, isAmbiguousGeocodeMatch } from '@/lib/utils/activityTravelResolution';
+import type { DbExecutor } from '@/lib/db/client';
+
+const mockResolveVenueDestination = jest.fn(async (text: string, bias: unknown, _executor?: unknown) => {
+  const candidates = await mockGeocodeAddress(text, 3, bias);
+  if (candidates.length === 0) return { ok: false, failureReason: 'geocode_failed' };
+  if (isAmbiguousGeocodeMatch(candidates)) return { ok: false, failureReason: 'ambiguous_address' };
+  const top = candidates[0];
+  return { ok: true, location: { address: text, lat: top.latitude, lon: top.longitude }, venueId: null };
+});
+jest.mock('@/lib/services/activityVenues', () => ({
+  resolveVenueDestination: (...a: [string, unknown, unknown]) => mockResolveVenueDestination(...a),
+}));
+
+// The real db export is a Proxy that lazily connects (and throws without
+// DATABASE_URL) on any property access — even one jest's own matchers
+// perform internally while comparing a recorded mock-call argument. This
+// test only needs a stable, comparable default-executor value, not a real
+// connection.
+jest.mock('@/lib/db/client', () => ({ db: { __brand: 'default-db-executor' } }));
 
 const HOME = { address: '1 Home Way, Springfield', lat: 40.0, lon: -75.0 };
 const DESTINATION_TEXT = 'Rink B, Springfield';
@@ -363,5 +392,35 @@ describe('computeActivityTravel — staleness / cache reuse', () => {
     const result = await computeActivityTravel(baseInput({ existingTravelMeta: previouslyFailed }));
     expect(result?.status).toBe('ok');
     expect(mockGetDrivingRoute).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('computeActivityTravel — venue directory wiring', () => {
+  it('resolves the destination through resolveVenueDestination with the destination text and Home bias', async () => {
+    mockGeocodeAddress.mockResolvedValueOnce(geocodeOk(DESTINATION_GEO.lat, DESTINATION_GEO.lon));
+    mockGetDrivingRoute.mockResolvedValueOnce({ status: 'ok', route: { distanceMeters: 1, durationSeconds: 1 }, failureReason: null });
+
+    await computeActivityTravel(baseInput());
+
+    expect(mockResolveVenueDestination).toHaveBeenCalledWith(DESTINATION_TEXT, { lat: HOME.lat, lon: HOME.lon }, expect.anything());
+  });
+
+  it('passes a caller-provided executor through to resolveVenueDestination instead of the default db', async () => {
+    mockGeocodeAddress.mockResolvedValueOnce(geocodeOk(DESTINATION_GEO.lat, DESTINATION_GEO.lon));
+    mockGetDrivingRoute.mockResolvedValueOnce({ status: 'ok', route: { distanceMeters: 1, durationSeconds: 1 }, failureReason: null });
+    const fakeExecutor = { select: jest.fn(), insert: jest.fn(), update: jest.fn(), delete: jest.fn() } as unknown as DbExecutor;
+
+    await computeActivityTravel(baseInput(), fakeExecutor);
+
+    expect(mockResolveVenueDestination).toHaveBeenCalledWith(DESTINATION_TEXT, { lat: HOME.lat, lon: HOME.lon }, fakeExecutor);
+  });
+
+  it('never calls resolveVenueDestination when a parent-confirmed destination pin is set (no free text to resolve)', async () => {
+    mockGetDrivingRoute.mockResolvedValueOnce({ status: 'ok', route: { distanceMeters: 1, durationSeconds: 1 }, failureReason: null });
+    const pin = { address: 'Pinned Place', lat: 40.1, lon: -75.1 };
+
+    await computeActivityTravel(baseInput({ locationOverride: pin.address, destinationOverrideCoords: pin }));
+
+    expect(mockResolveVenueDestination).not.toHaveBeenCalled();
   });
 });

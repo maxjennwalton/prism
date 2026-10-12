@@ -28,6 +28,11 @@
  * with a resolved travel estimate (calculated, manual override, or profile
  * fallback) is never flagged either; "using the profile fallback" is not
  * one of the five issue types.
+ *
+ * Every issue carries originalLocation — the raw, unresolved destination
+ * text — so a "Fix Destination" action (the existing DestinationPicker in
+ * ActivityTravelPanel.tsx) has something to show and pre-fill its search
+ * from without a second lookup.
  */
 import { and, eq, gte, lt } from 'drizzle-orm';
 import { db, type DbExecutor } from '@/lib/db/client';
@@ -54,6 +59,14 @@ export interface WeeklyReviewIssue {
   memberName: string | null;
   /** The raw travel_meta.failureReason behind ambiguous_address/unavailable_route, if any. */
   detail: string | null;
+  /**
+   * The raw, unresolved location text a "Fix Destination" action should
+   * show and search from — locationOverride if one is set (even an
+   * un-geocodable one), else the raw calendar event.location, else the
+   * profile default. Null only when none of those is configured at all
+   * (the missing_destination case already covers that).
+   */
+  originalLocation: string | null;
 }
 
 interface ReviewCandidateRow {
@@ -128,7 +141,15 @@ export async function detectWeeklyReviewIssues(
   const issues: WeeklyReviewIssue[] = [];
 
   for (const r of settled) {
-    const base = { linkId: r.linkId, eventId: r.eventId, eventTitle: r.eventTitle, eventStart: r.eventStart, memberName: r.memberName };
+    const destination = resolveEffectiveLocation(r.locationOverride, r.eventLocation, r.profileDefaultLocation ?? null);
+    const base = {
+      linkId: r.linkId,
+      eventId: r.eventId,
+      eventTitle: r.eventTitle,
+      eventStart: r.eventStart,
+      memberName: r.memberName,
+      originalLocation: destination,
+    };
 
     if (r.matchStatus === 'needs_review') {
       issues.push({ ...base, type: 'unreviewed_match', detail: null });
@@ -141,7 +162,6 @@ export async function detectWeeklyReviewIssues(
       continue;
     }
 
-    const destination = resolveEffectiveLocation(r.locationOverride, r.eventLocation, r.profileDefaultLocation ?? null);
     if (!destination) {
       issues.push({ ...base, type: 'missing_destination', detail: null });
       continue;
